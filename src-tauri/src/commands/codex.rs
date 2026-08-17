@@ -1,5 +1,6 @@
 use crate::{
     account::CodexAccountInfo,
+    alerts::AlertServiceStatus,
     burn_rate::BurnRateEstimate,
     codex,
     error::CommandResult,
@@ -75,6 +76,18 @@ pub async fn get_codex_quota_predictions(
     force: bool,
 ) -> CommandResult<Vec<QuotaPrediction>> {
     Ok(state.quota_prediction_service.get_predictions(force).await)
+}
+
+#[tauri::command]
+pub async fn get_alert_status(state: State<'_, AppState>) -> CommandResult<AlertServiceStatus> {
+    Ok(state.alert_service.status())
+}
+
+#[tauri::command]
+pub async fn request_alert_notification_permission(
+    state: State<'_, AppState>,
+) -> CommandResult<AlertServiceStatus> {
+    Ok(state.alert_service.request_notification_permission().await)
 }
 
 #[tauri::command]

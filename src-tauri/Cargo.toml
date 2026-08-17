@@ -25,6 +25,7 @@ sqlx = { version = "0.8", default-features = false, features = ["sqlite", "runti
 thiserror = "2"
 tokio = { version = "1", features = ["io-util", "macros", "process", "rt-multi-thread", "sync", "time"] }
 tauri-plugin-log = "2"
+tauri-plugin-notification = "2"
 log = "0.4"
 which = "8"
 tempfile = "3"

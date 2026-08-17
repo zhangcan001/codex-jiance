@@ -13,6 +13,7 @@ import {
   detectCodexEnvironment,
   checkCodexSchemaCompatibility,
   getAppInfo,
+  getAlertStatus,
   getCodexAccount,
   getCodexAppServerStatus,
   getCodexBurnRates,
@@ -23,11 +24,13 @@ import {
   healthCheck,
   startCodexAppServer,
   stopCodexAppServer,
+  requestAlertNotificationPermission,
 } from "../../services/tauri";
 import type {
   AccountStatus,
   AppServerStatus,
   AppServerStatusInfo,
+  AlertServiceStatus,
   BurnRateEstimate,
   QuotaPrediction,
   CodexAccountInfo,
@@ -582,6 +585,9 @@ export default function DashboardPage() {
   const [quotaPredictions, setQuotaPredictions] = useState<QuotaPrediction[]>([]);
   const [predictionError, setPredictionError] = useState<string | null>(null);
   const [isPredictionLoading, setIsPredictionLoading] = useState(false);
+  const [alertStatus, setAlertStatus] = useState<AlertServiceStatus | null>(null);
+  const [alertError, setAlertError] = useState<string | null>(null);
+  const [isAlertLoading, setIsAlertLoading] = useState(false);
   const [usageInfo, setUsageInfo] = useState<CodexUsageInfo | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [isUsageLoading, setIsUsageLoading] = useState(false);
@@ -735,6 +741,33 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadAlertStatus = useCallback(async () => {
+    setIsAlertLoading(true);
+    setAlertError(null);
+
+    try {
+      setAlertStatus(await getAlertStatus());
+    } catch (loadError: unknown) {
+      setAlertStatus(null);
+      setAlertError(getErrorMessage(loadError));
+    } finally {
+      setIsAlertLoading(false);
+    }
+  }, []);
+
+  const enableAlertNotifications = useCallback(async () => {
+    setIsAlertLoading(true);
+    setAlertError(null);
+
+    try {
+      setAlertStatus(await requestAlertNotificationPermission());
+    } catch (loadError: unknown) {
+      setAlertError(getErrorMessage(loadError));
+    } finally {
+      setIsAlertLoading(false);
+    }
+  }, []);
+
   const refreshDashboardData = useCallback(async () => {
     await Promise.allSettled([
       loadAccount(true),
@@ -742,8 +775,9 @@ export default function DashboardPage() {
       loadUsage(true),
       loadBurnRates(true),
       loadQuotaPredictions(true),
+      loadAlertStatus(),
     ]);
-  }, [loadAccount, loadBurnRates, loadRateLimits, loadQuotaPredictions, loadUsage]);
+  }, [loadAccount, loadAlertStatus, loadBurnRates, loadRateLimits, loadQuotaPredictions, loadUsage]);
 
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
@@ -901,6 +935,15 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadQuotaPredictions]);
+
+  useEffect(() => {
+    void loadAlertStatus();
+    const intervalId = window.setInterval(() => {
+      void loadAlertStatus();
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [loadAlertStatus]);
 
   useEffect(() => {
     if (
@@ -1088,6 +1131,18 @@ export default function DashboardPage() {
   const visibleQuotaPredictions = accountReady ? quotaPredictions : [];
   const fiveHourPrediction = findQuotaPrediction(visibleQuotaPredictions, 300);
   const weeklyPrediction = findQuotaPrediction(visibleQuotaPredictions, 10080);
+  const alertPermissionLabel =
+    alertStatus?.notificationPermission === "granted"
+      ? "Notifications Enabled"
+      : alertStatus?.notificationPermission === "prompt"
+        ? "Permission required"
+        : "Notifications Disabled";
+  const alertPermissionVariant: StatusVariant =
+    alertStatus?.notificationPermission === "granted"
+      ? "success"
+      : alertStatus?.notificationPermission === "prompt"
+        ? "warning"
+        : "neutral";
 
   return (
     <div className="page page--dashboard">
@@ -1115,10 +1170,11 @@ export default function DashboardPage() {
               isAccountLoading ||
               isRateLimitLoading ||
               isUsageLoading ||
-              isBurnRateLoading
+              isBurnRateLoading ||
+              isAlertLoading
             }
           >
-            {isAccountLoading || isRateLimitLoading || isUsageLoading || isBurnRateLoading
+            {isAccountLoading || isRateLimitLoading || isUsageLoading || isBurnRateLoading || isAlertLoading
               ? "Refreshing…"
               : "Refresh Data"}
           </button>
@@ -1265,6 +1321,52 @@ export default function DashboardPage() {
         {!accountReady ? (
           <p className="codex-message">Start the Codex App Server to estimate burn rate.</p>
         ) : null}
+      </section>
+
+      <section className="section-block" aria-labelledby="alerts-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Local system notifications and in-app history</p>
+            <h2 id="alerts-heading">Alerts</h2>
+          </div>
+          <StatusBadge variant={alertPermissionVariant}>{alertPermissionLabel}</StatusBadge>
+        </div>
+        <div className="codex-environment">
+          <div className="codex-row">
+            <span>Alert Worker</span>
+            <strong>{alertStatus?.activeWorker ? "Running" : "Inactive"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Stored Alerts</span>
+            <strong>{alertStatus?.alertCount ?? 0}</strong>
+          </div>
+        </div>
+        {alertStatus?.notificationPermission !== "granted" ? (
+          <button
+            className="button button--secondary button--compact"
+            type="button"
+            onClick={() => void enableAlertNotifications()}
+            disabled={isAlertLoading}
+          >
+            {isAlertLoading ? "Checking…" : "Enable Notifications"}
+          </button>
+        ) : null}
+        {alertStatus?.latestAlerts.length ? (
+          <div className="usage-bucket-list" aria-label="Recent quota alerts">
+            {alertStatus.latestAlerts.slice(0, 10).map((alert) => (
+              <div className="usage-bucket" key={alert.id}>
+                <strong>{alert.message}</strong>
+                <span>
+                  {alert.trustClass === "estimated" ? "Estimated · " : ""}
+                  {formatStartedAt(alert.createdAt)}
+                </span>
+              </div>
+            ))}
+          </div>
+        ) : (
+          <p className="codex-message">No alerts recorded.</p>
+        )}
+        {alertError ? <p className="codex-message">{alertError}</p> : null}
       </section>
 
       <details className="diagnostics-panel">

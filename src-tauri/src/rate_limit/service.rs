@@ -39,6 +39,7 @@ pub(crate) struct RateLimitService {
     repository: Arc<RateLimitRepository>,
     cache: Arc<RwLock<RateLimitCache>>,
     watcher: Mutex<Option<RateLimitWatcher>>,
+    updates: broadcast::Sender<RateLimitInfo>,
 }
 
 impl RateLimitService {
@@ -59,7 +60,12 @@ impl RateLimitService {
                 fetched_at: None,
             })),
             watcher: Mutex::new(None),
+            updates: broadcast::channel(16).0,
         }
+    }
+
+    pub(crate) fn subscribe_updates(&self) -> broadcast::Receiver<RateLimitInfo> {
+        self.updates.subscribe()
     }
 
     pub(crate) async fn get_rate_limits(&self, force: bool) -> RateLimitInfo {
@@ -108,6 +114,7 @@ impl RateLimitService {
             Ok(rate_limits) => {
                 self.set_cache(rate_limits.clone()).await;
                 self.persist_snapshot(&rate_limits).await;
+                let _ = self.updates.send(rate_limits.clone());
                 log::info!("Rate limit cache refreshed");
                 rate_limits
             }
@@ -154,6 +161,7 @@ impl RateLimitService {
             Arc::clone(&self.cache),
             Weak::clone(&client_weak),
             Some(Arc::clone(&self.repository)),
+            self.updates.clone(),
             receiver,
         ));
         *watcher = Some(RateLimitWatcher {
@@ -206,6 +214,7 @@ async fn watch_notifications(
     cache: Arc<RwLock<RateLimitCache>>,
     client: Weak<JsonRpcClient>,
     repository: Option<Arc<RateLimitRepository>>,
+    updates: broadcast::Sender<RateLimitInfo>,
     mut receiver: broadcast::Receiver<crate::codex::app_server::json_rpc::RpcNotification>,
 ) {
     loop {
@@ -213,14 +222,18 @@ async fn watch_notifications(
             Ok(notification) if notification.method == RATE_LIMIT_UPDATED_METHOD => {
                 log::info!("account/rateLimits/updated received");
                 mark_cache_stale(&cache).await;
-                if !refresh_from_notification(&cache, &client, repository.as_deref()).await {
+                if !refresh_from_notification(&cache, &client, repository.as_deref(), &updates)
+                    .await
+                {
                     log::warn!("Rate limit cache refresh after notification failed");
                 }
             }
             Ok(_) => {}
             Err(broadcast::error::RecvError::Lagged(_)) => {
                 mark_cache_stale(&cache).await;
-                if !refresh_from_notification(&cache, &client, repository.as_deref()).await {
+                if !refresh_from_notification(&cache, &client, repository.as_deref(), &updates)
+                    .await
+                {
                     log::warn!("Rate limit cache refresh after notification lag failed");
                 }
             }
@@ -236,6 +249,7 @@ async fn refresh_from_notification(
     cache: &Arc<RwLock<RateLimitCache>>,
     client: &Weak<JsonRpcClient>,
     repository: Option<&RateLimitRepository>,
+    updates: &broadcast::Sender<RateLimitInfo>,
 ) -> bool {
     let Some(client) = client.upgrade() else {
         return false;
@@ -254,6 +268,7 @@ async fn refresh_from_notification(
                     log::warn!("Rate limit snapshot persistence failed: {error}");
                 }
             }
+            let _ = updates.send(rate_limits);
             log::info!("Rate limit cache refreshed");
             true
         }
@@ -608,10 +623,12 @@ mod tests {
             fetched_at: None,
         }));
         let receiver = client.subscribe_notifications();
+        let (updates, _) = broadcast::channel(16);
         let watcher = tokio::spawn(super::watch_notifications(
             Arc::clone(&cache),
             Arc::downgrade(&client),
             None,
+            updates,
             receiver,
         ));
 
@@ -693,10 +710,12 @@ mod tests {
                 params: Value::Null,
             })
             .expect("second notification should send");
+        let (updates, _) = broadcast::channel(16);
         let watcher = tokio::spawn(super::watch_notifications(
             Arc::clone(&cache),
             Arc::downgrade(&client),
             None,
+            updates.clone(),
             receiver,
         ));
 
@@ -738,10 +757,12 @@ mod tests {
 
         let (closed_sender, closed_receiver) = broadcast::channel(1);
         drop(closed_sender);
+        let (closed_updates, _) = broadcast::channel(1);
         let closed_watcher = tokio::spawn(super::watch_notifications(
             Arc::clone(&cache),
             Weak::new(),
             None,
+            closed_updates,
             closed_receiver,
         ));
         timeout(Duration::from_secs(1), closed_watcher)

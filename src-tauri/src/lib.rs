@@ -1,4 +1,5 @@
 mod account;
+mod alerts;
 mod burn_rate;
 mod codex;
 mod commands;
@@ -32,6 +33,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 .timezone_strategy(TimezoneStrategy::UseLocal)
                 .build(),
         )
+        .plugin(tauri_plugin_notification::init())
         .setup(|app| {
             log::info!("Application starting");
 
@@ -42,7 +44,8 @@ pub fn run() -> Result<(), tauri::Error> {
             let database = tauri::async_runtime::block_on(database::initialize(&app_data_dir))
                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
-            app.manage(AppState::from_database(database));
+            app.manage(AppState::from_database(database, app.handle().clone()));
+            app.state::<AppState>().alert_service.start();
             tray::setup(app)?;
             log::info!("Application ready");
             Ok(())
@@ -60,6 +63,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::get_codex_rate_limits,
             commands::codex::get_codex_burn_rates,
             commands::codex::get_codex_quota_predictions,
+            commands::codex::get_alert_status,
+            commands::codex::request_alert_notification_permission,
             commands::codex::get_codex_usage
         ])
         .on_window_event(|window, event| {
@@ -82,6 +87,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 "Application exit received; cleaning up Usage, Rate Limit, Account, and App Server"
             );
             let state = app_handle.state::<AppState>();
+            tauri::async_runtime::block_on(state.alert_service.shutdown());
             tauri::async_runtime::block_on(state.usage_service.shutdown());
             tauri::async_runtime::block_on(state.rate_limit_service.shutdown());
             tauri::async_runtime::block_on(state.account_service.shutdown());

@@ -159,6 +159,37 @@ export interface QuotaPrediction {
   message: string | null;
 }
 
+export type NotificationPermission = "granted" | "denied" | "prompt";
+export type QuotaAlertType = "usageThreshold" | "predictedDepletion";
+export type QuotaAlertSeverity = "warning" | "high" | "critical" | "exhausted";
+
+export interface QuotaAlert {
+  id: string;
+  type: QuotaAlertType;
+  severity: QuotaAlertSeverity;
+  limitId: string | null;
+  limitName: string | null;
+  windowKind: RateLimitWindowKind | null;
+  windowDurationMins: number | null;
+  used: number | null;
+  threshold: number | null;
+  predictionOutcome: QuotaPredictionOutcome | null;
+  secondsToDepletion: number | null;
+  resetsAt: number | null;
+  trustClass: "official" | "estimated";
+  createdAt: number;
+  message: string;
+}
+
+export interface AlertServiceStatus {
+  running: boolean;
+  notificationPermission: NotificationPermission;
+  notificationAvailable: boolean;
+  activeWorker: boolean;
+  alertCount: number;
+  latestAlerts: QuotaAlert[];
+}
+
 export type UsageStatus = "available" | "unavailable" | "error";
 
 export interface UsageSummary {

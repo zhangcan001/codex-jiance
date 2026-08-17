@@ -8,7 +8,7 @@ pub(crate) enum RateLimitStatus {
     Error,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq, Hash)]
 #[serde(rename_all = "camelCase")]
 pub(crate) enum RateLimitWindowKind {
     Primary,
