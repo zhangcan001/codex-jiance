@@ -42,6 +42,22 @@ pub enum AppError {
     #[error("App Server stop failed: {0}")]
     AppServerStop(String),
 
+    #[error("RPC remote error: {0}")]
+    #[allow(dead_code)]
+    RpcRemote(String),
+
+    #[error("RPC disconnected: {0}")]
+    #[allow(dead_code)]
+    RpcDisconnected(String),
+
+    #[error("RPC protocol error: {0}")]
+    #[allow(dead_code)]
+    RpcProtocol(String),
+
+    #[error("RPC request timed out: {0}")]
+    #[allow(dead_code)]
+    RpcTimeout(String),
+
     #[error("Unknown application error: {0}")]
     Unknown(String),
 }
@@ -112,6 +128,22 @@ impl From<AppError> for CommandError {
             },
             AppError::AppServerStop(message) => Self {
                 code: "APP_SERVER_STOP_ERROR".to_owned(),
+                message,
+            },
+            AppError::RpcRemote(message) => Self {
+                code: "RPC_REMOTE_ERROR".to_owned(),
+                message,
+            },
+            AppError::RpcDisconnected(message) => Self {
+                code: "RPC_DISCONNECTED".to_owned(),
+                message,
+            },
+            AppError::RpcProtocol(message) => Self {
+                code: "RPC_PROTOCOL_ERROR".to_owned(),
+                message,
+            },
+            AppError::RpcTimeout(message) => Self {
+                code: "RPC_TIMEOUT".to_owned(),
                 message,
             },
             AppError::Unknown(message) => Self {

@@ -1,8 +1,11 @@
+use std::sync::Arc;
+
 use tokio::sync::Mutex;
 
 use crate::{
     codex::{
         app_server::process::{spawn_app_server, stop_app_server, AppServerProcess},
+        app_server::JsonRpcClient,
         detector,
     },
     error::AppError,
@@ -12,6 +15,7 @@ use crate::{
 struct AppServerInner {
     status: AppServerStatus,
     process: Option<AppServerProcess>,
+    client: Option<Arc<JsonRpcClient>>,
     last_error: Option<String>,
 }
 
@@ -27,6 +31,7 @@ impl AppServerManager {
             inner: Mutex::new(AppServerInner {
                 status: AppServerStatus::Stopped,
                 process: None,
+                client: None,
                 last_error: None,
             }),
         }
@@ -49,18 +54,18 @@ impl AppServerManager {
         drop(inner);
 
         log::info!("App Server starting");
-        let result = start_process().await;
+        let result = match start_process().await {
+            Ok(process) => attach_client(process).await,
+            Err(error) => Err(error),
+        };
 
         let mut inner = self.inner.lock().await;
         match result {
-            Ok(process) => {
+            Ok((process, client)) => {
                 log::info!("App Server started");
                 log::info!("App Server PID: {:?}", process.pid);
-                log::debug!(
-                    "App Server stdin/stdout preserved: {}",
-                    process.pipes_preserved()
-                );
                 inner.process = Some(process);
+                inner.client = Some(client);
                 inner.status = AppServerStatus::Running;
                 inner.last_error = None;
                 Ok(snapshot(&inner))
@@ -78,7 +83,7 @@ impl AppServerManager {
 
     pub async fn stop(&self) -> Result<AppServerStatusInfo, AppError> {
         let _lifecycle_guard = self.lifecycle_lock.lock().await;
-        let process = {
+        let (process, client) = {
             let mut inner = self.inner.lock().await;
             refresh_locked(&mut inner).await.map_err(|error| {
                 AppError::AppServerStop(format!(
@@ -86,17 +91,27 @@ impl AppServerManager {
                 ))
             })?;
 
-            let Some(process) = inner.process.take() else {
+            let process = inner.process.take();
+            let client = inner.client.take();
+            let Some(process) = process else {
                 inner.status = AppServerStatus::Stopped;
                 inner.last_error = None;
-                return Ok(snapshot(&inner));
+                let status = snapshot(&inner);
+                drop(inner);
+                if let Some(client) = client {
+                    client.shutdown().await;
+                }
+                return Ok(status);
             };
 
             inner.status = AppServerStatus::Stopping;
-            process
+            (process, client)
         };
 
         log::info!("App Server stopping");
+        if let Some(client) = client {
+            client.shutdown().await;
+        }
         let result = stop_app_server(process).await;
         let mut inner = self.inner.lock().await;
 
@@ -121,6 +136,11 @@ impl AppServerManager {
         let mut inner = self.inner.lock().await;
         refresh_locked(&mut inner).await?;
         Ok(snapshot(&inner))
+    }
+
+    #[allow(dead_code)]
+    pub async fn client(&self) -> Option<Arc<JsonRpcClient>> {
+        self.inner.lock().await.client.clone()
     }
 
     pub async fn shutdown(&self) -> Result<(), AppError> {
@@ -162,6 +182,22 @@ async fn start_process() -> Result<AppServerProcess, AppError> {
     spawn_app_server(std::path::Path::new(&executable_path)).await
 }
 
+async fn attach_client(
+    mut process: AppServerProcess,
+) -> Result<(AppServerProcess, Arc<JsonRpcClient>), AppError> {
+    let pipes_preserved = process.pipes_preserved();
+    let (stdout, stdin) = match process.take_stdio() {
+        Ok(stdio) => stdio,
+        Err(error) => {
+            let _ = stop_app_server(process).await;
+            return Err(error);
+        }
+    };
+    let client = JsonRpcClient::from_child_stdio(stdout, stdin).await;
+    log::debug!("App Server stdin/stdout preserved: {pipes_preserved}");
+    Ok((process, client))
+}
+
 async fn refresh_locked(inner: &mut AppServerInner) -> Result<(), AppError> {
     let exit_status = match inner.process.as_mut() {
         Some(process) => process.child.try_wait().map_err(|error| {
@@ -178,6 +214,9 @@ async fn refresh_locked(inner: &mut AppServerInner) -> Result<(), AppError> {
         Some(process) => process.last_stderr().await,
         None => None,
     };
+    if let Some(client) = inner.client.take() {
+        client.shutdown().await;
+    }
     if let Some(mut process) = inner.process.take() {
         process.close_stderr_logger().await;
     }

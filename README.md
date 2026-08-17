@@ -1,10 +1,10 @@
 # Codex Usage Monitor
 
-Codex Usage Monitor is a Windows desktop application for local Codex usage monitoring. The current milestone keeps the DEV-002 CLI detection foundation and adds safe local Codex App Server process lifecycle control. Account and usage integration is intentionally not included yet.
+Codex Usage Monitor is a Windows desktop application for local Codex usage monitoring. The current milestone keeps the DEV-002 CLI detection foundation, adds safe local Codex App Server lifecycle control, and connects the stdio pipes to a generic JSON-RPC transport client. Account and usage integration is intentionally not included yet.
 
 ## Current development stage
 
-`DEV-003 — Codex App Server Process Manager`
+`DEV-004 — Codex App Server JSON-RPC Client`
 
 ## Technology stack
 
@@ -71,7 +71,7 @@ src-tauri/
 ├─ migrations/          # SQLx migrations
 └─ src/
    ├─ commands/          # Tauri commands
-   ├─ codex/              # CLI discovery and App Server process lifecycle
+   ├─ codex/              # CLI discovery, App Server lifecycle, and JSON-RPC transport
    ├─ database/          # SQLite pool and migration coordination
    ├─ error/             # Unified backend and command errors
    ├─ models/            # Serializable backend response models
@@ -88,7 +88,7 @@ On Windows the default database file is:
 
 The current migration creates `app_meta`, `settings`, and `schema_info`, and records schema version `1`.
 
-## DEV-003 currently provides
+## DEV-004 currently provides
 
 - Tauri desktop shell
 - React frontend
@@ -114,14 +114,19 @@ The current migration creates `app_meta`, `settings`, and `schema_info`, and rec
 - Lifecycle-changing App Server operations are serialized so shutdown waits for in-flight startup before cleanup
 - Windows process-tree cleanup for `.cmd`/`.bat` wrappers
 - Application-exit cleanup through the Tauri lifecycle
+- Generic newline-delimited JSON-RPC client over the preserved App Server stdio pipes
+- Monotonic request IDs, concurrent requests, out-of-order response routing, and remote errors
+- Notification and server-request broadcast channels
+- Request timeouts, EOF/disconnect cleanup, malformed-message handling, and bounded input lines
+- Explicit client shutdown integrated with App Server stop and application-exit cleanup
 
 ## Not implemented yet
 
-JSON-RPC communication, account information, and usage monitoring are not implemented yet.
+Account information and usage monitoring are not implemented yet. The JSON-RPC layer is transport-only.
 
-The following remain intentionally out of scope for DEV-003:
+The following remain intentionally out of scope for DEV-004:
 
-- JSON-RPC communication or the initialization handshake
+- Initialization handshakes and account, rate-limit, or usage business calls
 - Account, authentication, rate-limit, token-usage, or credit data
 - Codex model calls, Threads, or Turns
 - API-equivalent cost calculation
@@ -132,4 +137,4 @@ The database schema remains at version `1`; App Server lifecycle state is kept i
 
 ## Next stage
 
-`DEV-004 — Codex App Server JSON-RPC Client`
+Account and usage integration remains a future stage.

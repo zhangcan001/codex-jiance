@@ -119,6 +119,16 @@ impl AppServerProcess {
         self.stdin.is_some() && self.stdout.is_some()
     }
 
+    pub(crate) fn take_stdio(&mut self) -> Result<(ChildStdout, ChildStdin), AppError> {
+        let stdout = self.stdout.take().ok_or_else(|| {
+            AppError::AppServerStart("App Server stdout pipe is unavailable.".to_owned())
+        })?;
+        let stdin = self.stdin.take().ok_or_else(|| {
+            AppError::AppServerStart("App Server stdin pipe is unavailable.".to_owned())
+        })?;
+        Ok((stdout, stdin))
+    }
+
     pub(crate) async fn last_stderr(&self) -> Option<String> {
         self.stderr_diagnostic.lock().await.clone()
     }
