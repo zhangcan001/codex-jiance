@@ -21,6 +21,7 @@ import {
   getCodexRateLimits,
   getCodexUsage,
   getThreadUsageStatus,
+  getModelUsage,
   getDatabaseStatus,
   healthCheck,
   startCodexAppServer,
@@ -45,6 +46,7 @@ import type {
   SchemaCompatibilityStatus,
   UsageStatus,
   ThreadUsageInfo,
+  ModelUsageReport,
 } from "../../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../../types/system";
 
@@ -596,6 +598,9 @@ export default function DashboardPage() {
   const [threadUsageInfo, setThreadUsageInfo] = useState<ThreadUsageInfo | null>(null);
   const [threadUsageError, setThreadUsageError] = useState<string | null>(null);
   const [isThreadUsageLoading, setIsThreadUsageLoading] = useState(false);
+  const [modelUsageInfo, setModelUsageInfo] = useState<ModelUsageReport | null>(null);
+  const [modelUsageError, setModelUsageError] = useState<string | null>(null);
+  const [isModelUsageLoading, setIsModelUsageLoading] = useState(false);
   const hasLoadedCodexRef = useRef(false);
   const hasLoadedAppServerRef = useRef(false);
   const hasLoadedCompatibilityRef = useRef(false);
@@ -732,6 +737,19 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadModelUsage = useCallback(async () => {
+    setIsModelUsageLoading(true);
+    setModelUsageError(null);
+    try {
+      setModelUsageInfo(await getModelUsage());
+    } catch (loadError: unknown) {
+      setModelUsageInfo(null);
+      setModelUsageError(getErrorMessage(loadError));
+    } finally {
+      setIsModelUsageLoading(false);
+    }
+  }, []);
+
   const loadBurnRates = useCallback(async (force = false) => {
     setIsBurnRateLoading(true);
     setBurnRateError(null);
@@ -793,11 +811,12 @@ export default function DashboardPage() {
       loadRateLimits(true),
       loadUsage(true),
       loadThreadUsage(true),
+      loadModelUsage(),
       loadBurnRates(true),
       loadQuotaPredictions(true),
       loadAlertStatus(),
     ]);
-  }, [loadAccount, loadAlertStatus, loadBurnRates, loadRateLimits, loadQuotaPredictions, loadThreadUsage, loadUsage]);
+  }, [loadAccount, loadAlertStatus, loadBurnRates, loadModelUsage, loadRateLimits, loadQuotaPredictions, loadThreadUsage, loadUsage]);
 
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
@@ -940,6 +959,17 @@ export default function DashboardPage() {
     const intervalId = window.setInterval(() => void loadThreadUsage(), 60_000);
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadThreadUsage]);
+
+  useEffect(() => {
+    if (!accountReady) {
+      setModelUsageInfo(null);
+      setModelUsageError(null);
+      return;
+    }
+    void loadModelUsage();
+    const intervalId = window.setInterval(() => void loadModelUsage(), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [accountReady, loadModelUsage]);
 
   useEffect(() => {
     if (!accountReady) {
@@ -1299,8 +1329,8 @@ export default function DashboardPage() {
           />
           <MetricCard
             title="API Equivalent Cost"
-            value="Unavailable"
-            subtitle="Waiting for model/token breakdown"
+            value={isModelUsageLoading ? "Checking..." : modelUsageInfo?.totalApiEquivalentCostUsd === null || !modelUsageInfo ? "Unavailable" : `$${modelUsageInfo.totalApiEquivalentCostUsd.toFixed(4)}`}
+            subtitle={modelUsageError ?? `Observed & priced events only · Pricing coverage: ${modelUsageInfo?.pricingCoveragePercent.toFixed(1) ?? "0.0"}%`}
             label="Derived"
           />
         </div>

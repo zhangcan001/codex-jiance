@@ -9,6 +9,7 @@ use crate::{
     burn_rate::BurnRateService,
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
+    model_usage::ModelUsageService,
     prediction::QuotaPredictionService,
     project::ProjectService,
     rate_limit::{RateLimitRepository, RateLimitService},
@@ -31,6 +32,7 @@ pub struct AppState {
     pub usage_service: Arc<UsageService>,
     pub thread_usage_service: Arc<ThreadUsageService>,
     pub project_service: Arc<ProjectService>,
+    pub model_usage_service: Arc<ModelUsageService>,
 }
 
 impl AppState {
@@ -73,6 +75,7 @@ impl AppState {
             Arc::clone(&thread_usage_repository),
         ));
         let project_service = Arc::new(ProjectService::new(Arc::clone(&thread_usage_repository)));
+        let model_usage_service = Arc::new(ModelUsageService::new(thread_usage_repository));
 
         Self {
             db_pool: database.pool,
@@ -88,6 +91,7 @@ impl AppState {
             usage_service,
             thread_usage_service,
             project_service,
+            model_usage_service,
         }
     }
 }

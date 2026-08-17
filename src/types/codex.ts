@@ -257,3 +257,37 @@ export interface ProjectUsageReport {
   startAt: number | null;
   endAt: number | null;
 }
+
+export interface ModelUsageAggregate {
+  modelId: string;
+  modelSource: string;
+  eventCount: number;
+  threadCount: number;
+  totalTokens: number;
+  inputTokens: number;
+  uncachedInputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  cacheHitPercent: number | null;
+  apiEquivalentCostUsd: number | null;
+  pricingAvailable: boolean;
+  pricingEffectiveDate: string | null;
+  pricedEventCount: number;
+  unpricedEventCount: number;
+  pricingCoveragePercent: number;
+  firstObservedAt: number | null;
+  lastObservedAt: number | null;
+  trustClass: "derived";
+}
+
+export interface ModelUsageReport {
+  models: ModelUsageAggregate[];
+  observedDeltaEvents: number;
+  pricedDeltaEvents: number;
+  pricingCoveragePercent: number;
+  totalApiEquivalentCostUsd: number | null;
+  startAt: number | null;
+  endAt: number | null;
+}

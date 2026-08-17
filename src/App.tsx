@@ -5,6 +5,7 @@ import { AppLayout } from "./components/layout/AppLayout";
 import DashboardPage from "./pages/Dashboard";
 import SettingsPage from "./pages/Settings";
 import ProjectsPage from "./pages/Projects";
+import ModelsPage from "./pages/Models";
 import { initialAppState } from "./stores/app";
 import { ErrorState } from "./components/common/ErrorState";
 
@@ -46,6 +47,8 @@ function CurrentPage({ route }: { route: RouteKey }) {
       return <SettingsPage />;
     case routes.projects.key:
       return <ProjectsPage />;
+    case routes.models.key:
+      return <ModelsPage />;
     case routes.overview.key:
     default:
       return <DashboardPage />;

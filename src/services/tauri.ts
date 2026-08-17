@@ -12,6 +12,7 @@ import type {
   SchemaCompatibilityReport,
   ThreadUsageInfo,
   ProjectUsageReport,
+  ModelUsageReport,
 } from "../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
 
@@ -122,4 +123,8 @@ export function getThreadUsageStatus(forceInventory = false): Promise<ThreadUsag
 
 export function getProjectUsage(startAt?: number, endAt?: number): Promise<ProjectUsageReport> {
   return invokeCommand<ProjectUsageReport>("get_project_usage", { startAt, endAt });
+}
+
+export function getModelUsage(startAt?: number, endAt?: number): Promise<ModelUsageReport> {
+  return invokeCommand<ModelUsageReport>("get_model_usage", { startAt, endAt });
 }
