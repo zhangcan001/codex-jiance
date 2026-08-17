@@ -38,14 +38,11 @@ pub(crate) struct TokenUsageBreakdownWire {
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct ThreadListResponseWire {
-    pub(crate) data: ThreadListDataWire,
+    pub(crate) data: Vec<ThreadWire>,
     #[serde(default)]
     pub(crate) next_cursor: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-pub(crate) struct ThreadListDataWire {
-    pub(crate) items: Vec<ThreadWire>,
+    #[serde(default)]
+    pub(crate) backwards_cursor: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -114,4 +111,73 @@ pub(crate) fn source_string(value: Option<Value>) -> Option<String> {
         Value::String(value) => value,
         value => value.to_string(),
     })
+}
+
+#[cfg(test)]
+mod tests {
+    use serde_json::json;
+
+    use super::ThreadListResponseWire;
+
+    #[test]
+    fn thread_list_response_matches_current_app_server_shape() {
+        let response: ThreadListResponseWire = serde_json::from_value(json!({
+            "data": [{
+                "id": "thr_1",
+                "sessionId": "session_1",
+                "preview": "THIS MUST BE IGNORED",
+                "modelProvider": "openai",
+                "createdAt": 100,
+                "updatedAt": 200,
+                "recencyAt": 200,
+                "cwd": "C:\\Projects\\Demo",
+                "cliVersion": "1.0.0",
+                "source": "cli",
+                "threadSource": "user",
+                "gitInfo": {
+                    "sha": "abc",
+                    "branch": "main",
+                    "originUrl": "PRIVATE_URL_MUST_BE_IGNORED"
+                },
+                "name": "Demo",
+                "futureThreadField": { "x": 1 }
+            }],
+            "nextCursor": "cursor-next",
+            "backwardsCursor": "cursor-back",
+            "futureResponseField": true
+        }))
+        .expect("current thread/list response should deserialize");
+
+        assert_eq!(response.data.len(), 1);
+        assert_eq!(response.data[0].id, "thr_1");
+        assert_eq!(response.next_cursor.as_deref(), Some("cursor-next"));
+        assert_eq!(response.backwards_cursor.as_deref(), Some("cursor-back"));
+        assert_eq!(
+            response.data[0].git_info.as_ref().unwrap().sha.as_deref(),
+            Some("abc")
+        );
+        assert_eq!(
+            response.data[0]
+                .git_info
+                .as_ref()
+                .unwrap()
+                .branch
+                .as_deref(),
+            Some("main")
+        );
+    }
+
+    #[test]
+    fn thread_list_response_accepts_final_page_without_cursors() {
+        let response: ThreadListResponseWire = serde_json::from_value(json!({
+            "data": [],
+            "nextCursor": null,
+            "backwardsCursor": null
+        }))
+        .expect("final thread/list response should deserialize");
+
+        assert!(response.data.is_empty());
+        assert!(response.next_cursor.is_none());
+        assert!(response.backwards_cursor.is_none());
+    }
 }

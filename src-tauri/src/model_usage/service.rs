@@ -158,16 +158,16 @@ impl AggregateBuilder {
             row.try_get("delta_reasoning_output_tokens")?,
             "delta reasoning output tokens",
         )?;
-        let uncached = input.saturating_sub(cached.saturating_add(cache_write));
+        let uncached = valid_uncached_input(input, cached, cache_write);
         self.total_tokens = self.total_tokens.saturating_add(total);
         self.input_tokens = self.input_tokens.saturating_add(input);
-        self.uncached_input_tokens = self.uncached_input_tokens.saturating_add(uncached);
         self.cached_input_tokens = self.cached_input_tokens.saturating_add(cached);
         self.cache_write_input_tokens = self.cache_write_input_tokens.saturating_add(cache_write);
         self.output_tokens = self.output_tokens.saturating_add(output);
         self.reasoning_output_tokens = self.reasoning_output_tokens.saturating_add(reasoning);
-        if let Some(model) = model_id {
-            if input >= cached.saturating_add(cache_write) {
+        if let Some(uncached) = uncached {
+            self.uncached_input_tokens = self.uncached_input_tokens.saturating_add(uncached);
+            if let Some(model) = model_id {
                 if let Ok(cost) = calculate_api_equivalent_cost(TokenCostInput {
                     model: model.to_owned(),
                     uncached_input_tokens: uncached,
@@ -243,12 +243,54 @@ fn coverage(priced: usize, total: usize) -> f64 {
     }
 }
 
+fn valid_uncached_input(input: u64, cached: u64, cache_write: u64) -> Option<u64> {
+    cached
+        .checked_add(cache_write)
+        .and_then(|accounted_input| input.checked_sub(accounted_input))
+}
+
 #[cfg(test)]
 mod tests {
-    use super::coverage;
+    use super::{coverage, valid_uncached_input, AggregateBuilder};
+    use crate::database::connection::create_pool;
 
     #[test]
     fn zero_priced_events_have_zero_coverage() {
         assert_eq!(coverage(0, 3), 0.0);
+    }
+
+    #[test]
+    fn invalid_input_breakdown_cannot_create_uncached_tokens() {
+        assert_eq!(valid_uncached_input(10, 6, 5), None);
+        assert_eq!(valid_uncached_input(u64::MAX, u64::MAX, 1), None);
+        assert_eq!(valid_uncached_input(10, 6, 4), Some(0));
+    }
+
+    #[tokio::test]
+    async fn invalid_breakdown_keeps_totals_but_excludes_uncached_and_pricing() {
+        let pool = create_pool("sqlite::memory:")
+            .await
+            .expect("memory database should connect");
+        let row = sqlx::query(
+            "SELECT 100 AS delta_total_tokens, 10 AS delta_input_tokens,
+                    6 AS delta_cached_input_tokens, 5 AS delta_cache_write_input_tokens,
+                    2 AS delta_output_tokens, 1 AS delta_reasoning_output_tokens,
+                    'gpt-5' AS model_id, 'thread-1' AS thread_id, 1 AS observed_at",
+        )
+        .fetch_one(&pool)
+        .await
+        .expect("token row should be available");
+
+        let mut aggregate = AggregateBuilder::new("gpt-5".to_owned(), "derived".to_owned());
+        aggregate
+            .add(&row, Some("gpt-5"))
+            .expect("aggregate should accept token totals");
+        let aggregate = aggregate.finish().expect("aggregate should finish");
+
+        assert_eq!(aggregate.total_tokens, 100);
+        assert_eq!(aggregate.input_tokens, 10);
+        assert_eq!(aggregate.uncached_input_tokens, 0);
+        assert_eq!(aggregate.priced_event_count, 0);
+        assert_eq!(aggregate.unpriced_event_count, 1);
     }
 }

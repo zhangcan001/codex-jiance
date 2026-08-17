@@ -389,11 +389,19 @@ impl ThreadUsageRepository {
             "SELECT observed_at, delta_total_tokens, delta_input_tokens,
                     delta_cached_input_tokens, delta_cache_write_input_tokens,
                     delta_output_tokens, delta_reasoning_output_tokens, project_key, model_id
-             FROM thread_token_snapshots
-             WHERE delta_total_tokens IS NOT NULL
-               AND (? IS NULL OR observed_at >= ?)
-               AND (? IS NULL OR observed_at < ?)
-             ORDER BY observed_at ASC, id ASC LIMIT ?",
+             FROM (
+                 SELECT observed_at, id, delta_total_tokens, delta_input_tokens,
+                        delta_cached_input_tokens, delta_cache_write_input_tokens,
+                        delta_output_tokens, delta_reasoning_output_tokens,
+                        project_key, model_id
+                 FROM thread_token_snapshots
+                 WHERE delta_total_tokens IS NOT NULL
+                   AND (? IS NULL OR observed_at >= ?)
+                   AND (? IS NULL OR observed_at < ?)
+                 ORDER BY observed_at DESC, id DESC
+                 LIMIT ?
+             )
+             ORDER BY observed_at ASC, id ASC",
         )
         .bind(start_at)
         .bind(start_at)
@@ -739,5 +747,47 @@ mod tests {
         .await
         .unwrap();
         assert!(fk_count > 0);
+    }
+
+    #[tokio::test]
+    async fn history_points_keep_the_latest_two_thousand_deltas_in_order() {
+        let repository = repository().await;
+        sqlx::query(
+            "INSERT INTO thread_metadata
+             (thread_id, session_id, cwd, project_key, project_name, created_at, updated_at, last_seen_at)
+             VALUES ('thread-1', 'session-1', 'C:\\Projects\\Demo', 'C:\\Projects\\Demo', 'Demo', 1, 1, 1)",
+        )
+        .execute(&repository.pool)
+        .await
+        .expect("thread metadata should insert");
+
+        for observed_at in 0..=2_000_i64 {
+            sqlx::query(
+                "INSERT INTO thread_token_snapshots
+                 (thread_id, turn_id, observed_at, total_tokens, input_tokens,
+                  cached_input_tokens, cache_write_input_tokens, output_tokens,
+                  reasoning_output_tokens, last_total_tokens, last_input_tokens,
+                  last_cached_input_tokens, last_cache_write_input_tokens, last_output_tokens,
+                  last_reasoning_output_tokens, delta_total_tokens, delta_input_tokens,
+                  delta_cached_input_tokens, delta_cache_write_input_tokens, delta_output_tokens,
+                  delta_reasoning_output_tokens, fingerprint)
+                 VALUES ('thread-1', ?, ?, 1, 1, 0, 0, 0, 0, 1, 1, 0, 0, 0, 0,
+                         1, 1, 0, 0, 0, 0, ?)",
+            )
+            .bind(format!("turn-{observed_at}"))
+            .bind(observed_at)
+            .bind(format!("fingerprint-{observed_at}"))
+            .execute(&repository.pool)
+            .await
+            .expect("token history point should insert");
+        }
+
+        let points = repository
+            .history_points(None, None, 2_000)
+            .await
+            .expect("token history should load");
+        assert_eq!(points.len(), 2_000);
+        assert_eq!(points.first().unwrap().observed_at, 1);
+        assert_eq!(points.last().unwrap().observed_at, 2_000);
     }
 }

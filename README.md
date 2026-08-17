@@ -169,6 +169,7 @@ The current migrations create `app_meta`, `settings`, `schema_info`, official ra
 - Local Reset Countdown driven by official Unix-second `resetsAt` values
 - Passive Thread Token Usage observation from `thread/tokenUsage/updated`
 - Bounded non-archived Thread metadata inventory through `thread/list`
+- Thread inventory uses the current stable `thread/list` response shape where `result.data` is the thread array
 - Derived Project and Model aggregation from observed token deltas
 - Explicit pricing coverage with Unknown and unsupported models excluded from cost
 - History dashboard with native SVG rate-limit and observed-token charts
@@ -200,6 +201,8 @@ The following remain intentionally out of scope for DEV-014:
 - HTTP requests, cookie access, authentication file access, and token persistence
 
 Thread token usage coverage is limited to token-usage notifications observed by this monitor's App Server connection. The application does not resume threads solely to harvest token history, does not read conversation previews, and does not persist prompt or assistant message text. Rate-limit and token history queries are bounded to 2,000 points.
+
+No `thread/resume` is used for monitoring.
 
 ## Next stage
 

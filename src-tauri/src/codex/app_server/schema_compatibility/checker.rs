@@ -34,6 +34,7 @@ pub(crate) const OPTIONAL_CAPABILITIES: &[&str] = &[
     "lifetimeTokens",
     "startDate",
     "thread/tokenUsage/updated",
+    "thread/list",
 ];
 
 pub(crate) fn check_schema(
@@ -187,8 +188,8 @@ mod tests {
         assert_eq!(report.status, SchemaCompatibilityStatus::Compatible);
         assert_eq!(report.required_passed, 13);
         assert_eq!(report.required_total, 13);
-        assert_eq!(report.optional_passed, 9);
-        assert_eq!(report.optional_total, 9);
+        assert_eq!(report.optional_passed, 10);
+        assert_eq!(report.optional_total, 10);
         assert!(report.core_monitoring_compatible);
         assert!(report.advanced_thread_usage_supported);
     }
@@ -204,7 +205,24 @@ mod tests {
         assert_eq!(report.status, SchemaCompatibilityStatus::Limited);
         assert!(report.core_monitoring_compatible);
         assert!(!report.advanced_thread_usage_supported);
-        assert_eq!(report.optional_passed, 8);
+        assert_eq!(report.optional_passed, 9);
+    }
+
+    #[test]
+    fn reports_limited_when_thread_inventory_is_missing_but_core_remains_compatible() {
+        let keys = all_keys()
+            .into_iter()
+            .filter(|key| *key != "thread/list")
+            .collect::<Vec<_>>();
+        let report = check_schema(&index_with(&keys), None, 1, 1, 1);
+
+        assert_eq!(report.status, SchemaCompatibilityStatus::Limited);
+        assert!(report.core_monitoring_compatible);
+        assert!(report.advanced_thread_usage_supported);
+        assert!(report
+            .checks
+            .iter()
+            .any(|check| check.key == "thread/list" && !check.present && !check.required));
     }
 
     #[test]

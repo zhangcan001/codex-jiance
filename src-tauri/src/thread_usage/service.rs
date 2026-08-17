@@ -90,6 +90,8 @@ impl ThreadUsageService {
             );
         }
 
+        let inventory_supported = has_capability(&compatibility, THREAD_LIST_METHOD);
+
         let client = match self.app_server_manager.initialized_client().await {
             Ok(client) => client,
             Err(_) => {
@@ -101,8 +103,13 @@ impl ThreadUsageService {
         };
         self.ensure_watcher(&client).await;
 
-        let should_inventory = force_inventory || !self.inventory.read().await.loaded;
-        if should_inventory {
+        if !inventory_supported {
+            let mut inventory = self.inventory.write().await;
+            *inventory = ThreadInventoryCache {
+                loaded: true,
+                ..ThreadInventoryCache::default()
+            };
+        } else if force_inventory || !self.inventory.read().await.loaded {
             if let Err(error) = self.refresh_inventory(&client).await {
                 log::warn!("Thread inventory refresh failed: {error}");
             }
@@ -119,7 +126,9 @@ impl ThreadUsageService {
                     )
                 }
             };
-        let message = if snapshot_count == 0 {
+        let message = if !inventory_supported {
+            "Passive token usage is available, but thread inventory is not supported by this App Server schema.".to_owned()
+        } else if snapshot_count == 0 {
             "No token-usage events observed on this App Server connection".to_owned()
         } else {
             format!("Observed {delta_events} derived token delta event(s) on this App Server connection")
@@ -189,7 +198,8 @@ impl ThreadUsageService {
                 serde_json::from_value(response).map_err(|_| {
                     AppError::RpcProtocol("Thread list response could not be parsed.".to_owned())
                 })?;
-            for thread in response.data.items {
+            let _backwards_cursor = response.backwards_cursor;
+            for thread in response.data {
                 if count >= MAX_THREADS {
                     truncated = true;
                     break;
@@ -214,6 +224,185 @@ impl ThreadUsageService {
         inventory.loaded = true;
         Ok(())
     }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::sync::Arc;
+
+    use serde_json::{json, Value};
+    use tokio::io::{split, AsyncBufReadExt, AsyncWriteExt, BufReader};
+
+    use super::ThreadUsageService;
+    use crate::{
+        codex::app_server::{AppServerManager, JsonRpcClient, SchemaCompatibilityService},
+        database::{connection::create_pool, migrations},
+        thread_usage::repository::ThreadUsageRepository,
+    };
+
+    async fn service() -> ThreadUsageService {
+        let pool = create_pool("sqlite::memory:")
+            .await
+            .expect("memory database should connect");
+        migrations::run(&pool)
+            .await
+            .expect("database migration should complete");
+        ThreadUsageService::new(
+            Arc::new(AppServerManager::new()),
+            Arc::new(SchemaCompatibilityService::new()),
+            Arc::new(ThreadUsageRepository::new(pool)),
+        )
+    }
+
+    fn thread(id: &str) -> Value {
+        json!({
+            "id": id,
+            "sessionId": format!("session-{id}"),
+            "modelProvider": "openai",
+            "createdAt": 100,
+            "updatedAt": 200,
+            "cwd": "C:\\Projects\\Demo",
+            "cliVersion": "1.0.0"
+        })
+    }
+
+    async fn read_request(
+        reader: &mut BufReader<tokio::io::ReadHalf<tokio::io::DuplexStream>>,
+    ) -> Value {
+        let mut line = String::new();
+        reader
+            .read_line(&mut line)
+            .await
+            .expect("fake server should read request");
+        serde_json::from_str(&line).expect("request should be JSON")
+    }
+
+    async fn write_response(
+        writer: &mut tokio::io::WriteHalf<tokio::io::DuplexStream>,
+        id: &Value,
+        data: Value,
+        next_cursor: Option<&str>,
+    ) {
+        let response = json!({
+            "id": id,
+            "result": {
+                "data": data,
+                "nextCursor": next_cursor,
+                "backwardsCursor": null
+            }
+        });
+        writer
+            .write_all(serde_json::to_string(&response).unwrap().as_bytes())
+            .await
+            .expect("fake server should write response");
+        writer
+            .write_all(b"\n")
+            .await
+            .expect("fake server should terminate response line");
+    }
+
+    #[tokio::test]
+    async fn inventory_uses_thread_list_request_and_persists_metadata() {
+        let service = service().await;
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        let (client_reader, client_writer) = split(client_io);
+        let (server_reader, mut server_writer) = split(server_io);
+        let client = JsonRpcClient::from_io(client_reader, client_writer).await;
+
+        let server = tokio::spawn(async move {
+            let mut reader = BufReader::new(server_reader);
+            let request = read_request(&mut reader).await;
+            assert_eq!(request["method"], "thread/list");
+            assert_eq!(request["params"]["limit"], 100);
+            assert_eq!(request["params"]["sortKey"], "updated_at");
+            assert_eq!(request["params"]["archived"], false);
+            assert!(request["params"].get("sourceKinds").is_none());
+            write_response(
+                &mut server_writer,
+                &request["id"],
+                json!([thread("thread-1")]),
+                None,
+            )
+            .await;
+        });
+
+        service
+            .refresh_inventory(&client)
+            .await
+            .expect("inventory should parse and persist");
+        server.await.expect("fake server should finish");
+
+        let inventory = service.inventory.read().await;
+        assert_eq!(inventory.thread_count, 1);
+        assert!(!inventory.truncated);
+        assert!(inventory.loaded);
+        let metadata_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM thread_metadata")
+            .fetch_one(&service.repository.pool)
+            .await
+            .expect("metadata should be persisted");
+        assert_eq!(metadata_count, 1);
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn inventory_follows_next_cursor_for_pagination() {
+        let service = service().await;
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        let (client_reader, client_writer) = split(client_io);
+        let (server_reader, mut server_writer) = split(server_io);
+        let client = JsonRpcClient::from_io(client_reader, client_writer).await;
+
+        let server = tokio::spawn(async move {
+            let mut reader = BufReader::new(server_reader);
+
+            let first = read_request(&mut reader).await;
+            assert_eq!(first["method"], "thread/list");
+            assert!(first["params"].get("cursor").is_none());
+            write_response(
+                &mut server_writer,
+                &first["id"],
+                json!([thread("thread-1")]),
+                Some("page-2"),
+            )
+            .await;
+
+            let second = read_request(&mut reader).await;
+            assert_eq!(second["method"], "thread/list");
+            assert_eq!(second["params"]["cursor"], "page-2");
+            write_response(
+                &mut server_writer,
+                &second["id"],
+                json!([thread("thread-2")]),
+                None,
+            )
+            .await;
+        });
+
+        service
+            .refresh_inventory(&client)
+            .await
+            .expect("paginated inventory should parse and persist");
+        server.await.expect("fake server should finish");
+
+        let inventory = service.inventory.read().await;
+        assert_eq!(inventory.thread_count, 2);
+        let metadata_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM thread_metadata")
+            .fetch_one(&service.repository.pool)
+            .await
+            .expect("metadata should be persisted");
+        assert_eq!(metadata_count, 2);
+        client.shutdown().await;
+    }
+}
+
+fn has_capability(
+    compatibility: &crate::models::codex::SchemaCompatibilityReport,
+    capability: &str,
+) -> bool {
+    compatibility
+        .checks
+        .iter()
+        .any(|check| check.key == capability && check.present)
 }
 
 async fn watch_notifications(

@@ -9,6 +9,9 @@ use crate::{
     },
 };
 
+#[cfg(test)]
+use crate::rate_limit::model::RateLimitWindow;
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum PersistResult {
     Inserted(i64),
@@ -230,13 +233,20 @@ impl RateLimitRepository {
     ) -> Result<Vec<RateLimitHistoryPoint>, AppError> {
         let limit = i64::try_from(max_points.min(2_000)).unwrap_or(2_000);
         let rows = sqlx::query(
-            "SELECT s.captured_at, w.limit_id, w.window_kind, w.window_duration_mins,
-                    w.used_percent, w.resets_at
-             FROM rate_limit_snapshots AS s
-             INNER JOIN rate_limit_windows AS w ON w.snapshot_id=s.id
-             WHERE (? IS NULL OR s.captured_at >= ?)
-               AND (? IS NULL OR s.captured_at < ?)
-             ORDER BY s.captured_at ASC, s.id ASC, w.id ASC LIMIT ?",
+            "SELECT captured_at, limit_id, window_kind, window_duration_mins,
+                    used_percent, resets_at
+             FROM (
+                 SELECT s.captured_at, s.id AS snapshot_id, w.id AS window_id,
+                        w.limit_id, w.window_kind, w.window_duration_mins,
+                        w.used_percent, w.resets_at
+                 FROM rate_limit_snapshots AS s
+                 INNER JOIN rate_limit_windows AS w ON w.snapshot_id=s.id
+                 WHERE (? IS NULL OR s.captured_at >= ?)
+                   AND (? IS NULL OR s.captured_at < ?)
+                 ORDER BY s.captured_at DESC, s.id DESC, w.id DESC
+                 LIMIT ?
+             )
+             ORDER BY captured_at ASC, snapshot_id ASC, window_id ASC",
         )
         .bind(start_at)
         .bind(start_at)
@@ -554,6 +564,39 @@ mod tests {
             .await
             .expect("snapshot count should load");
         assert_eq!(count, 0);
+    }
+
+    #[tokio::test]
+    async fn history_for_range_keeps_the_latest_two_thousand_points_in_order() {
+        let repository = repository().await;
+        for captured_at in 0..=2_000_i64 {
+            let snapshot_id: i64 = sqlx::query_scalar(
+                "INSERT INTO rate_limit_snapshots (captured_at, fingerprint) VALUES (?, ?) RETURNING id",
+            )
+            .bind(captured_at)
+            .bind(format!("fingerprint-{captured_at}"))
+            .fetch_one(&repository.pool)
+            .await
+            .expect("snapshot should insert");
+            sqlx::query(
+                "INSERT INTO rate_limit_windows
+                 (snapshot_id, limit_id, window_kind, used_percent)
+                 VALUES (?, 'chatgpt', 'primary', ?)",
+            )
+            .bind(snapshot_id)
+            .bind(captured_at as f64)
+            .execute(&repository.pool)
+            .await
+            .expect("window should insert");
+        }
+
+        let points = repository
+            .history_for_range(None, None, 2_000)
+            .await
+            .expect("history should load");
+        assert_eq!(points.len(), 2_000);
+        assert_eq!(points.first().unwrap().captured_at, 1);
+        assert_eq!(points.last().unwrap().captured_at, 2_000);
     }
 
     #[tokio::test]
