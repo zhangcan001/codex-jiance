@@ -108,7 +108,7 @@ The current migration creates `app_meta`, `settings`, and `schema_info`, and rec
 - Long-running `codex app-server --listen stdio://` startup
 - In-memory App Server lifecycle state: stopped, starting, running, stopping, failed
 - PID and startup timestamp tracking
-- stdin/stdout preservation for the future JSON-RPC client
+- stdin/stdout handoff to the JSON-RPC client
 - Bounded stderr diagnostic logging
 - Idempotent start/stop and live process status refresh
 - Lifecycle-changing App Server operations are serialized so shutdown waits for in-flight startup before cleanup
@@ -119,10 +119,13 @@ The current migration creates `app_meta`, `settings`, and `schema_info`, and rec
 - Notification and server-request broadcast channels
 - Request timeouts, EOF/disconnect cleanup, malformed-message handling, and bounded input lines
 - Explicit client shutdown integrated with App Server stop and application-exit cleanup
+- App Server status exposes whether the JSON-RPC transport is currently connected
 
 ## Not implemented yet
 
-Account information and usage monitoring are not implemented yet. The JSON-RPC layer is transport-only.
+The JSON-RPC layer is transport-only. Initialization handshake is not implemented yet.
+Account information, rate limits, and token usage are not implemented yet.
+The transport can be connected while the Codex protocol handshake is still not initialized.
 
 The following remain intentionally out of scope for DEV-004:
 
@@ -137,4 +140,4 @@ The database schema remains at version `1`; App Server lifecycle state is kept i
 
 ## Next stage
 
-Account and usage integration remains a future stage.
+`DEV-005 — App Server initialize / initialized handshake`

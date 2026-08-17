@@ -87,6 +87,40 @@ function getAppServerStatusVariant(
   return "neutral";
 }
 
+function getJsonRpcStatusLabel(
+  status: AppServerStatus | null,
+  connected: boolean,
+  isLoading: boolean,
+): string {
+  if (isLoading || status === null) {
+    return "Checking...";
+  }
+  if (status === "running") {
+    return connected ? "Connected" : "Disconnected";
+  }
+  if (status === "starting") {
+    return "Connecting...";
+  }
+  if (status === "stopping") {
+    return "Detaching...";
+  }
+  return "Detached";
+}
+
+function getJsonRpcStatusVariant(
+  status: AppServerStatus | null,
+  connected: boolean,
+  isLoading: boolean,
+): StatusVariant {
+  if (isLoading || status === "starting" || status === "stopping") {
+    return "warning";
+  }
+  if (status === "running") {
+    return connected ? "success" : "error";
+  }
+  return "neutral";
+}
+
 function formatStartedAt(timestamp: number | null): string {
   return timestamp === null ? "--" : new Date(timestamp * 1000).toLocaleString();
 }
@@ -218,6 +252,17 @@ export default function DashboardPage() {
     appServerStatus,
     isAppServerLoading,
     appServerError,
+  );
+  const jsonRpcConnected = appServerInfo?.jsonRpcConnected ?? false;
+  const jsonRpcStatusLabel = getJsonRpcStatusLabel(
+    appServerStatus,
+    jsonRpcConnected,
+    isAppServerLoading,
+  );
+  const jsonRpcStatusVariant = getJsonRpcStatusVariant(
+    appServerStatus,
+    jsonRpcConnected,
+    isAppServerLoading,
   );
   const appServerBusy = isAppServerLoading || appServerAction !== null;
   const canStartAppServer =
@@ -403,6 +448,14 @@ export default function DashboardPage() {
             <span>Started</span>
             <strong>{formatStartedAt(appServerInfo?.startedAt ?? null)}</strong>
           </div>
+          <div className="codex-row">
+            <span>JSON-RPC</span>
+            <StatusBadge variant={jsonRpcStatusVariant}>{jsonRpcStatusLabel}</StatusBadge>
+          </div>
+          <div className="codex-row">
+            <span>Protocol Handshake</span>
+            <StatusBadge variant="neutral">Not initialized</StatusBadge>
+          </div>
         </div>
         {appServerMessage ? <p className="codex-message">{appServerMessage}</p> : null}
       </section>
@@ -446,9 +499,8 @@ export default function DashboardPage() {
         <div>
           <h2>Local-first foundation</h2>
           <p>
-            DEV-003 adds bounded App Server process lifecycle control while keeping stdin and
-            stdout reserved for the future JSON-RPC client. Account and usage monitoring are not
-            connected yet.
+            DEV-004 connects the App Server JSON-RPC transport while the protocol handshake remains
+            not initialized. Account and usage monitoring are not connected yet.
           </p>
         </div>
       </section>

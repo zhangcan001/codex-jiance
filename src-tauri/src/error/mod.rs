@@ -43,19 +43,15 @@ pub enum AppError {
     AppServerStop(String),
 
     #[error("RPC remote error: {0}")]
-    #[allow(dead_code)]
     RpcRemote(String),
 
     #[error("RPC disconnected: {0}")]
-    #[allow(dead_code)]
     RpcDisconnected(String),
 
     #[error("RPC protocol error: {0}")]
-    #[allow(dead_code)]
     RpcProtocol(String),
 
     #[error("RPC request timed out: {0}")]
-    #[allow(dead_code)]
     RpcTimeout(String),
 
     #[error("Unknown application error: {0}")]

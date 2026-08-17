@@ -23,5 +23,6 @@ export interface AppServerStatusInfo {
   startedAt: number | null;
   executablePath: string | null;
   transport: string;
+  jsonRpcConnected: boolean;
   lastError: string | null;
 }

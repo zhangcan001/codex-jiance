@@ -32,5 +32,6 @@ pub struct AppServerStatusInfo {
     pub started_at: Option<i64>,
     pub executable_path: Option<String>,
     pub transport: String,
+    pub json_rpc_connected: bool,
     pub last_error: Option<String>,
 }

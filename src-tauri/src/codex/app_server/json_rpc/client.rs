@@ -1,5 +1,3 @@
-#![allow(dead_code)]
-
 use std::{
     collections::HashMap,
     sync::{
@@ -50,7 +48,6 @@ pub struct JsonRpcClient {
     notification_sender: broadcast::Sender<RpcNotification>,
     server_request_sender: broadcast::Sender<RpcServerRequest>,
     connected: AtomicBool,
-    last_error: Mutex<Option<String>>,
     reader_task: Mutex<Option<JoinHandle<()>>>,
 }
 
@@ -73,7 +70,6 @@ impl JsonRpcClient {
             notification_sender,
             server_request_sender,
             connected: AtomicBool::new(true),
-            last_error: Mutex::new(None),
             reader_task: Mutex::new(None),
         });
 
@@ -82,11 +78,15 @@ impl JsonRpcClient {
         client
     }
 
+    // Used by DEV-005 App Server method calls.
+    #[allow(dead_code)]
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, AppError> {
         self.request_with_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
             .await
     }
 
+    // Used by transport tests and DEV-005 method-specific timeouts.
+    #[allow(dead_code)]
     pub(crate) async fn request_with_timeout(
         &self,
         method: &str,
@@ -125,6 +125,8 @@ impl JsonRpcClient {
         response.map_err(pending_error_to_app_error)
     }
 
+    // Used by DEV-005 protocol notifications.
+    #[allow(dead_code)]
     pub async fn send_notification(&self, method: &str, params: Value) -> Result<(), AppError> {
         let message = serde_json::to_value(RpcOutgoingNotification {
             method: method.to_owned(),
@@ -133,20 +135,20 @@ impl JsonRpcClient {
         self.write_value(message).await
     }
 
+    // Used by DEV-005 notification consumers.
+    #[allow(dead_code)]
     pub fn subscribe_notifications(&self) -> broadcast::Receiver<RpcNotification> {
         self.notification_sender.subscribe()
     }
 
+    // Used by DEV-005 server-request consumers.
+    #[allow(dead_code)]
     pub fn subscribe_server_requests(&self) -> broadcast::Receiver<RpcServerRequest> {
         self.server_request_sender.subscribe()
     }
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
-    }
-
-    pub async fn last_error(&self) -> Option<String> {
-        self.last_error.lock().await.clone()
     }
 
     pub async fn shutdown(&self) {
@@ -203,7 +205,6 @@ impl JsonRpcClient {
             log::warn!("App Server JSON-RPC transport disconnected: {message}");
         }
 
-        *self.last_error.lock().await = Some(message);
         self.writer.lock().await.take();
 
         let mut pending_requests = self.pending_requests.lock().await;
@@ -577,6 +578,19 @@ mod tests {
         assert!(client.is_connected());
 
         client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn connection_state_follows_shutdown() {
+        let (client_io, _server_io) = tokio::io::duplex(4096);
+        let (client_reader, client_writer) = split(client_io);
+        let client = JsonRpcClient::from_io(client_reader, client_writer).await;
+
+        assert!(client.is_connected());
+        client.shutdown().await;
+        assert!(!client.is_connected());
+        client.shutdown().await;
+        assert!(!client.is_connected());
     }
 
     #[tokio::test]

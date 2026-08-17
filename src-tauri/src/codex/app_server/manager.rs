@@ -138,11 +138,6 @@ impl AppServerManager {
         Ok(snapshot(&inner))
     }
 
-    #[allow(dead_code)]
-    pub async fn client(&self) -> Option<Arc<JsonRpcClient>> {
-        self.inner.lock().await.client.clone()
-    }
-
     pub async fn shutdown(&self) -> Result<(), AppError> {
         log::info!("App Server cleanup on application exit");
         self.stop().await.map(|_| ())
@@ -242,6 +237,10 @@ async fn refresh_locked(inner: &mut AppServerInner) -> Result<(), AppError> {
 
 fn snapshot(inner: &AppServerInner) -> AppServerStatusInfo {
     let process = inner.process.as_ref();
+    let json_rpc_connected = inner
+        .client
+        .as_ref()
+        .is_some_and(|client| client.is_connected());
     AppServerStatusInfo {
         status: inner.status,
         pid: process.and_then(|process| process.pid),
@@ -249,6 +248,7 @@ fn snapshot(inner: &AppServerInner) -> AppServerStatusInfo {
         executable_path: process
             .map(|process| process.executable_path.to_string_lossy().into_owned()),
         transport: "stdio".to_owned(),
+        json_rpc_connected,
         last_error: inner.last_error.clone(),
     }
 }
@@ -279,6 +279,10 @@ mod tests {
         assert_eq!(status.status, AppServerStatus::Stopped);
         assert_eq!(status.pid, None);
         assert_eq!(status.transport, "stdio");
+        assert!(!status.json_rpc_connected);
+        let serialized = serde_json::to_value(&status).expect("status should serialize");
+        assert_eq!(serialized["jsonRpcConnected"], false);
+        assert!(serialized.get("json_rpc_connected").is_none());
     }
 
     #[tokio::test]
