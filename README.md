@@ -111,6 +111,7 @@ The current migration creates `app_meta`, `settings`, and `schema_info`, and rec
 - stdin/stdout preservation for the future JSON-RPC client
 - Bounded stderr diagnostic logging
 - Idempotent start/stop and live process status refresh
+- Lifecycle-changing App Server operations are serialized so shutdown waits for in-flight startup before cleanup
 - Windows process-tree cleanup for `.cmd`/`.bat` wrappers
 - Application-exit cleanup through the Tauri lifecycle
 

@@ -16,12 +16,14 @@ struct AppServerInner {
 }
 
 pub struct AppServerManager {
+    lifecycle_lock: Mutex<()>,
     inner: Mutex<AppServerInner>,
 }
 
 impl AppServerManager {
     pub fn new() -> Self {
         Self {
+            lifecycle_lock: Mutex::new(()),
             inner: Mutex::new(AppServerInner {
                 status: AppServerStatus::Stopped,
                 process: None,
@@ -31,6 +33,7 @@ impl AppServerManager {
     }
 
     pub async fn start(&self) -> Result<AppServerStatusInfo, AppError> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let mut inner = self.inner.lock().await;
         refresh_locked(&mut inner).await?;
 
@@ -74,6 +77,7 @@ impl AppServerManager {
     }
 
     pub async fn stop(&self) -> Result<AppServerStatusInfo, AppError> {
+        let _lifecycle_guard = self.lifecycle_lock.lock().await;
         let process = {
             let mut inner = self.inner.lock().await;
             refresh_locked(&mut inner).await.map_err(|error| {
@@ -221,6 +225,10 @@ fn format_exit_error(code: Option<i32>, diagnostic: Option<String>) -> String {
 
 #[cfg(test)]
 mod tests {
+    use std::{sync::Arc, time::Duration};
+
+    use tokio::time::timeout;
+
     use super::AppServerManager;
     use crate::models::codex::AppServerStatus;
 
@@ -244,5 +252,39 @@ mod tests {
         assert_eq!(first.status, AppServerStatus::Stopped);
         assert_eq!(second.status, AppServerStatus::Stopped);
         assert_eq!(second.pid, None);
+    }
+
+    #[tokio::test]
+    async fn lifecycle_operations_are_serialized() {
+        let manager = Arc::new(AppServerManager::new());
+        let lifecycle_guard = manager.lifecycle_lock.lock().await;
+        let manager_clone = Arc::clone(&manager);
+        let mut stop_task = tokio::spawn(async move { manager_clone.stop().await });
+
+        assert!(timeout(Duration::from_millis(50), &mut stop_task)
+            .await
+            .is_err());
+
+        drop(lifecycle_guard);
+        let status = timeout(Duration::from_secs(1), stop_task)
+            .await
+            .expect("stop should not wait forever")
+            .expect("stop task should join")
+            .expect("stop should succeed");
+        assert_eq!(status.status, AppServerStatus::Stopped);
+    }
+
+    #[tokio::test]
+    async fn status_is_readable_while_lifecycle_operation_is_locked() {
+        let manager = AppServerManager::new();
+        let lifecycle_guard = manager.lifecycle_lock.lock().await;
+
+        let status = timeout(Duration::from_millis(500), manager.status())
+            .await
+            .expect("status should not wait for lifecycle lock")
+            .expect("status should be readable");
+        assert_eq!(status.status, AppServerStatus::Stopped);
+
+        drop(lifecycle_guard);
     }
 }
