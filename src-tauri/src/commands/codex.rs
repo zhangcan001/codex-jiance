@@ -6,6 +6,7 @@ use crate::{
     error::CommandResult,
     models::codex::{AppServerStatusInfo, CodexInstallationInfo, SchemaCompatibilityReport},
     prediction::QuotaPrediction,
+    project::ProjectUsageReport,
     rate_limit::RateLimitInfo,
     state::AppState,
     thread_usage::ThreadUsageInfo,
@@ -105,4 +106,17 @@ pub async fn get_thread_usage_status(
     force_inventory: bool,
 ) -> CommandResult<ThreadUsageInfo> {
     Ok(state.thread_usage_service.get_status(force_inventory).await)
+}
+
+#[tauri::command]
+pub async fn get_project_usage(
+    state: State<'_, AppState>,
+    start_at: Option<i64>,
+    end_at: Option<i64>,
+) -> CommandResult<ProjectUsageReport> {
+    state
+        .project_service
+        .get_usage(start_at, end_at)
+        .await
+        .map_err(Into::into)
 }

@@ -4,6 +4,7 @@ import { routes, type RouteKey } from "./app/routes";
 import { AppLayout } from "./components/layout/AppLayout";
 import DashboardPage from "./pages/Dashboard";
 import SettingsPage from "./pages/Settings";
+import ProjectsPage from "./pages/Projects";
 import { initialAppState } from "./stores/app";
 import { ErrorState } from "./components/common/ErrorState";
 
@@ -43,6 +44,8 @@ function CurrentPage({ route }: { route: RouteKey }) {
   switch (route) {
     case routes.settings.key:
       return <SettingsPage />;
+    case routes.projects.key:
+      return <ProjectsPage />;
     case routes.overview.key:
     default:
       return <DashboardPage />;

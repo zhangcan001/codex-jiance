@@ -11,6 +11,7 @@ import type {
   QuotaPrediction,
   SchemaCompatibilityReport,
   ThreadUsageInfo,
+  ProjectUsageReport,
 } from "../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
 
@@ -117,4 +118,8 @@ export function getCodexUsage(force = false): Promise<CodexUsageInfo> {
 
 export function getThreadUsageStatus(forceInventory = false): Promise<ThreadUsageInfo> {
   return invokeCommand<ThreadUsageInfo>("get_thread_usage_status", { forceInventory });
+}
+
+export function getProjectUsage(startAt?: number, endAt?: number): Promise<ProjectUsageReport> {
+  return invokeCommand<ProjectUsageReport>("get_project_usage", { startAt, endAt });
 }

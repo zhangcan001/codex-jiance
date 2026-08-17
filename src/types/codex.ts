@@ -226,3 +226,34 @@ export interface ThreadUsageInfo {
   coverageGapDetected: boolean;
   message: string;
 }
+
+export interface ProjectUsageAggregate {
+  projectKey: string;
+  projectName: string;
+  threadCount: number;
+  observedEventCount: number;
+  attributedDeltaEventCount: number;
+  totalTokens: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  cacheHitPercent: number | null;
+  apiEquivalentCostUsd: number | null;
+  pricedEventCount: number;
+  unpricedEventCount: number;
+  pricingCoveragePercent: number;
+  firstObservedAt: number | null;
+  lastObservedAt: number | null;
+  trustClass: "derived";
+}
+
+export interface ProjectUsageReport {
+  projects: ProjectUsageAggregate[];
+  observedDeltaEvents: number;
+  unknownProjectEvents: number;
+  pricingCoveragePercent: number;
+  startAt: number | null;
+  endAt: number | null;
+}

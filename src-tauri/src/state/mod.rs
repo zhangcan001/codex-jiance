@@ -10,6 +10,7 @@ use crate::{
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
     prediction::QuotaPredictionService,
+    project::ProjectService,
     rate_limit::{RateLimitRepository, RateLimitService},
     thread_usage::{ThreadUsageRepository, ThreadUsageService},
     usage::UsageService,
@@ -29,6 +30,7 @@ pub struct AppState {
     pub alert_service: Arc<AlertService>,
     pub usage_service: Arc<UsageService>,
     pub thread_usage_service: Arc<ThreadUsageService>,
+    pub project_service: Arc<ProjectService>,
 }
 
 impl AppState {
@@ -68,8 +70,9 @@ impl AppState {
         let thread_usage_service = Arc::new(ThreadUsageService::new(
             Arc::clone(&app_server_manager),
             Arc::clone(&schema_compatibility_service),
-            thread_usage_repository,
+            Arc::clone(&thread_usage_repository),
         ));
+        let project_service = Arc::new(ProjectService::new(Arc::clone(&thread_usage_repository)));
 
         Self {
             db_pool: database.pool,
@@ -84,6 +87,7 @@ impl AppState {
             alert_service,
             usage_service,
             thread_usage_service,
+            project_service,
         }
     }
 }

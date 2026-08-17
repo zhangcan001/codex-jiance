@@ -8,6 +8,7 @@ mod error;
 mod models;
 mod prediction;
 pub mod pricing;
+mod project;
 mod rate_limit;
 mod state;
 mod thread_usage;
@@ -67,7 +68,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::get_alert_status,
             commands::codex::request_alert_notification_permission,
             commands::codex::get_codex_usage,
-            commands::codex::get_thread_usage_status
+            commands::codex::get_thread_usage_status,
+            commands::codex::get_project_usage
         ])
         .on_window_event(|window, event| {
             if window.label() != tray::MAIN_WINDOW_LABEL {

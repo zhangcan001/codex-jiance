@@ -892,3 +892,31 @@ h3 {
     text-align: left;
   }
 }
+
+.data-table-wrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgb(17 22 30 / 72%);
+}
+
+.data-table {
+  width: 100%;
+  border-collapse: collapse;
+  color: var(--text-secondary);
+  font-size: 11px;
+  white-space: nowrap;
+}
+
+.data-table th,
+.data-table td {
+  padding: 13px 14px;
+  border-bottom: 1px solid var(--border-subtle);
+  text-align: right;
+}
+
+.data-table th:first-child,
+.data-table td:first-child { text-align: left; }
+.data-table th { color: var(--text-muted); font-size: 10px; letter-spacing: 0.06em; text-transform: uppercase; }
+.data-table td strong { color: var(--text-primary); }
+.data-table td small { color: var(--accent); }
