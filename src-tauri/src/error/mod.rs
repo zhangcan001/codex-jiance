@@ -21,6 +21,15 @@ pub enum AppError {
     #[error("Invalid application state: {0}")]
     InvalidState(String),
 
+    #[error("Process error: {0}")]
+    Process(String),
+
+    #[error("Process timed out: {0}")]
+    ProcessTimeout(String),
+
+    #[error("Codex detection error: {0}")]
+    CodexDetection(String),
+
     #[error("Unknown application error: {0}")]
     Unknown(String),
 }
@@ -63,6 +72,18 @@ impl From<AppError> for CommandError {
             },
             AppError::InvalidState(message) => Self {
                 code: "INVALID_STATE".to_owned(),
+                message,
+            },
+            AppError::Process(message) => Self {
+                code: "PROCESS_ERROR".to_owned(),
+                message,
+            },
+            AppError::ProcessTimeout(message) => Self {
+                code: "PROCESS_TIMEOUT".to_owned(),
+                message,
+            },
+            AppError::CodexDetection(message) => Self {
+                code: "CODEX_DETECTION_ERROR".to_owned(),
                 message,
             },
             AppError::Unknown(message) => Self {

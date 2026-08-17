@@ -1,3 +1,4 @@
+mod codex;
 mod commands;
 mod database;
 mod error;
@@ -41,7 +42,8 @@ pub fn run() -> Result<(), tauri::Error> {
         .invoke_handler(tauri::generate_handler![
             commands::system::get_app_info,
             commands::system::health_check,
-            commands::database::database_status
+            commands::database::database_status,
+            commands::codex::detect_codex_environment
         ])
         .run(tauri::generate_context!())
 }
