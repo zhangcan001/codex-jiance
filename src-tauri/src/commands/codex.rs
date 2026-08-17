@@ -8,6 +8,7 @@ use crate::{
     prediction::QuotaPrediction,
     rate_limit::RateLimitInfo,
     state::AppState,
+    thread_usage::ThreadUsageInfo,
     usage::CodexUsageInfo,
 };
 use tauri::State;
@@ -96,4 +97,12 @@ pub async fn get_codex_usage(
     force: bool,
 ) -> CommandResult<CodexUsageInfo> {
     Ok(state.usage_service.get_usage(force).await)
+}
+
+#[tauri::command]
+pub async fn get_thread_usage_status(
+    state: State<'_, AppState>,
+    force_inventory: bool,
+) -> CommandResult<ThreadUsageInfo> {
+    Ok(state.thread_usage_service.get_status(force_inventory).await)
 }

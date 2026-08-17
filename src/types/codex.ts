@@ -212,3 +212,17 @@ export interface CodexUsageInfo {
   updatedAt: number;
   message: string | null;
 }
+
+export type ThreadUsageStatus = "observing" | "unavailable" | "error";
+
+export interface ThreadUsageInfo {
+  status: ThreadUsageStatus;
+  coverage: string;
+  inventoryThreadCount: number;
+  inventoryTruncated: boolean;
+  observedThreadCount: number;
+  snapshotCount: number;
+  latestObservedAt: number | null;
+  coverageGapDetected: boolean;
+  message: string;
+}

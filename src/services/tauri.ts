@@ -10,6 +10,7 @@ import type {
   RateLimitInfo,
   QuotaPrediction,
   SchemaCompatibilityReport,
+  ThreadUsageInfo,
 } from "../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
 
@@ -112,4 +113,8 @@ export function requestAlertNotificationPermission(): Promise<AlertServiceStatus
 
 export function getCodexUsage(force = false): Promise<CodexUsageInfo> {
   return invokeCommand<CodexUsageInfo>("get_codex_usage", { force });
+}
+
+export function getThreadUsageStatus(forceInventory = false): Promise<ThreadUsageInfo> {
+  return invokeCommand<ThreadUsageInfo>("get_thread_usage_status", { forceInventory });
 }

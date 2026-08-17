@@ -20,6 +20,7 @@ import {
   getCodexQuotaPredictions,
   getCodexRateLimits,
   getCodexUsage,
+  getThreadUsageStatus,
   getDatabaseStatus,
   healthCheck,
   startCodexAppServer,
@@ -43,6 +44,7 @@ import type {
   SchemaCompatibilityReport,
   SchemaCompatibilityStatus,
   UsageStatus,
+  ThreadUsageInfo,
 } from "../../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../../types/system";
 
@@ -591,12 +593,16 @@ export default function DashboardPage() {
   const [usageInfo, setUsageInfo] = useState<CodexUsageInfo | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [isUsageLoading, setIsUsageLoading] = useState(false);
+  const [threadUsageInfo, setThreadUsageInfo] = useState<ThreadUsageInfo | null>(null);
+  const [threadUsageError, setThreadUsageError] = useState<string | null>(null);
+  const [isThreadUsageLoading, setIsThreadUsageLoading] = useState(false);
   const hasLoadedCodexRef = useRef(false);
   const hasLoadedAppServerRef = useRef(false);
   const hasLoadedCompatibilityRef = useRef(false);
   const hasLoadedAccountRef = useRef(false);
   const hasLoadedRateLimitRef = useRef(false);
   const hasLoadedUsageRef = useRef(false);
+  const hasLoadedThreadUsageRef = useRef(false);
   const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
   const lastAutoRefreshedResetAt = useRef(new Set<number>());
   const [countdownRefreshError, setCountdownRefreshError] = useState<string | null>(null);
@@ -713,6 +719,19 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadThreadUsage = useCallback(async (forceInventory = false) => {
+    setIsThreadUsageLoading(true);
+    setThreadUsageError(null);
+    try {
+      setThreadUsageInfo(await getThreadUsageStatus(forceInventory));
+    } catch (loadError: unknown) {
+      setThreadUsageInfo(null);
+      setThreadUsageError(getErrorMessage(loadError));
+    } finally {
+      setIsThreadUsageLoading(false);
+    }
+  }, []);
+
   const loadBurnRates = useCallback(async (force = false) => {
     setIsBurnRateLoading(true);
     setBurnRateError(null);
@@ -773,11 +792,12 @@ export default function DashboardPage() {
       loadAccount(true),
       loadRateLimits(true),
       loadUsage(true),
+      loadThreadUsage(true),
       loadBurnRates(true),
       loadQuotaPredictions(true),
       loadAlertStatus(),
     ]);
-  }, [loadAccount, loadAlertStatus, loadBurnRates, loadRateLimits, loadQuotaPredictions, loadUsage]);
+  }, [loadAccount, loadAlertStatus, loadBurnRates, loadRateLimits, loadQuotaPredictions, loadThreadUsage, loadUsage]);
 
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
@@ -905,6 +925,21 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadUsage]);
+
+  useEffect(() => {
+    if (!accountReady) {
+      hasLoadedThreadUsageRef.current = false;
+      setThreadUsageInfo(null);
+      setThreadUsageError(null);
+      return;
+    }
+    if (!hasLoadedThreadUsageRef.current) {
+      hasLoadedThreadUsageRef.current = true;
+      void loadThreadUsage();
+    }
+    const intervalId = window.setInterval(() => void loadThreadUsage(), 60_000);
+    return () => window.clearInterval(intervalId);
+  }, [accountReady, loadThreadUsage]);
 
   useEffect(() => {
     if (!accountReady) {
@@ -1367,6 +1402,26 @@ export default function DashboardPage() {
           <p className="codex-message">No alerts recorded.</p>
         )}
         {alertError ? <p className="codex-message">{alertError}</p> : null}
+      </section>
+
+      <section className="section-block" aria-labelledby="thread-usage-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Passive observation</p>
+            <h2 id="thread-usage-heading">Thread Usage Observation</h2>
+          </div>
+          <StatusBadge variant={threadUsageInfo?.status === "observing" ? "success" : "neutral"}>
+            {threadUsageInfo?.status === "observing" ? "Observing" : "Unavailable"}
+          </StatusBadge>
+        </div>
+        <div className="codex-environment">
+          <div className="codex-row"><span>Coverage</span><strong>{threadUsageInfo?.coverage ?? "Current App Server connection"}</strong></div>
+          <div className="codex-row"><span>Observed Threads</span><strong>{threadUsageInfo?.observedThreadCount ?? 0}</strong></div>
+          <div className="codex-row"><span>Snapshots</span><strong>{threadUsageInfo?.snapshotCount ?? 0}</strong></div>
+          <div className="codex-row"><span>Latest Event</span><strong>{threadUsageInfo?.latestObservedAt ? formatStartedAt(threadUsageInfo.latestObservedAt) : "--"}</strong></div>
+          <div className="codex-row"><span>Inventory Threads</span><strong>{threadUsageInfo?.inventoryThreadCount ?? 0}{threadUsageInfo?.inventoryTruncated ? " (truncated)" : ""}</strong></div>
+        </div>
+        <p className="codex-message">{isThreadUsageLoading ? "Checking..." : threadUsageError ?? threadUsageInfo?.message ?? "No token-usage events observed on this App Server connection"}</p>
       </section>
 
       <details className="diagnostics-panel">

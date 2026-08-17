@@ -10,6 +10,7 @@ mod prediction;
 pub mod pricing;
 mod rate_limit;
 mod state;
+mod thread_usage;
 mod tray;
 mod usage;
 
@@ -65,7 +66,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::get_codex_quota_predictions,
             commands::codex::get_alert_status,
             commands::codex::request_alert_notification_permission,
-            commands::codex::get_codex_usage
+            commands::codex::get_codex_usage,
+            commands::codex::get_thread_usage_status
         ])
         .on_window_event(|window, event| {
             if window.label() != tray::MAIN_WINDOW_LABEL {
@@ -88,6 +90,7 @@ pub fn run() -> Result<(), tauri::Error> {
             );
             let state = app_handle.state::<AppState>();
             tauri::async_runtime::block_on(state.alert_service.shutdown());
+            tauri::async_runtime::block_on(state.thread_usage_service.shutdown());
             tauri::async_runtime::block_on(state.usage_service.shutdown());
             tauri::async_runtime::block_on(state.rate_limit_service.shutdown());
             tauri::async_runtime::block_on(state.account_service.shutdown());
