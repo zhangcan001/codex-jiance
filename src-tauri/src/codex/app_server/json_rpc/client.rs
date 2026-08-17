@@ -78,15 +78,11 @@ impl JsonRpcClient {
         client
     }
 
-    // Used by DEV-005 App Server method calls.
-    #[allow(dead_code)]
     pub async fn request(&self, method: &str, params: Value) -> Result<Value, AppError> {
         self.request_with_timeout(method, params, DEFAULT_REQUEST_TIMEOUT)
             .await
     }
 
-    // Used by transport tests and DEV-005 method-specific timeouts.
-    #[allow(dead_code)]
     pub(crate) async fn request_with_timeout(
         &self,
         method: &str,
@@ -125,8 +121,6 @@ impl JsonRpcClient {
         response.map_err(pending_error_to_app_error)
     }
 
-    // Used by DEV-005 protocol notifications.
-    #[allow(dead_code)]
     pub async fn send_notification(&self, method: &str, params: Value) -> Result<(), AppError> {
         let message = serde_json::to_value(RpcOutgoingNotification {
             method: method.to_owned(),
@@ -149,6 +143,11 @@ impl JsonRpcClient {
 
     pub fn is_connected(&self) -> bool {
         self.connected.load(Ordering::Acquire)
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn pending_request_count(&self) -> usize {
+        self.pending_requests.lock().await.len()
     }
 
     pub async fn shutdown(&self) {

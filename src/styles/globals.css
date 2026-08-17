@@ -522,6 +522,15 @@ h3 {
   font-size: 13px;
 }
 
+.codex-runtime-value {
+  min-width: 0;
+  max-width: 70%;
+  overflow: hidden;
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .codex-row--path {
   align-items: flex-start;
   padding: 18px 0;
@@ -693,6 +702,11 @@ h3 {
   }
 
   .codex-path {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .codex-runtime-value {
     max-width: 100%;
     text-align: left;
   }

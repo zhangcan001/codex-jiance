@@ -14,7 +14,12 @@ import {
   startCodexAppServer,
   stopCodexAppServer,
 } from "../../services/tauri";
-import type { AppServerStatus, AppServerStatusInfo, CodexInstallationInfo } from "../../types/codex";
+import type {
+  AppServerStatus,
+  AppServerStatusInfo,
+  CodexInstallationInfo,
+  ProtocolHandshakeStatus,
+} from "../../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../../types/system";
 
 interface DashboardSnapshot {
@@ -117,6 +122,43 @@ function getJsonRpcStatusVariant(
   }
   if (status === "running") {
     return connected ? "success" : "error";
+  }
+  return "neutral";
+}
+
+function getHandshakeStatusLabel(
+  status: ProtocolHandshakeStatus | null,
+  isLoading: boolean,
+): string {
+  if (isLoading || status === null) {
+    return "Checking...";
+  }
+
+  switch (status) {
+    case "initializing":
+      return "Initializing...";
+    case "initialized":
+      return "Initialized";
+    case "failed":
+      return "Failed";
+    case "notInitialized":
+    default:
+      return "Not initialized";
+  }
+}
+
+function getHandshakeStatusVariant(
+  status: ProtocolHandshakeStatus | null,
+  isLoading: boolean,
+): StatusVariant {
+  if (isLoading || status === "initializing") {
+    return "warning";
+  }
+  if (status === "initialized") {
+    return "success";
+  }
+  if (status === "failed") {
+    return "error";
   }
   return "neutral";
 }
@@ -264,6 +306,9 @@ export default function DashboardPage() {
     jsonRpcConnected,
     isAppServerLoading,
   );
+  const handshakeStatus = appServerInfo?.handshakeStatus ?? null;
+  const handshakeStatusLabel = getHandshakeStatusLabel(handshakeStatus, isAppServerLoading);
+  const handshakeStatusVariant = getHandshakeStatusVariant(handshakeStatus, isAppServerLoading);
   const appServerBusy = isAppServerLoading || appServerAction !== null;
   const canStartAppServer =
     !appServerBusy &&
@@ -454,7 +499,31 @@ export default function DashboardPage() {
           </div>
           <div className="codex-row">
             <span>Protocol Handshake</span>
-            <StatusBadge variant="neutral">Not initialized</StatusBadge>
+            <StatusBadge variant={handshakeStatusVariant}>{handshakeStatusLabel}</StatusBadge>
+          </div>
+          <div className="codex-row">
+            <span>Server User Agent</span>
+            <strong
+              className="codex-runtime-value"
+              title={appServerInfo?.serverUserAgent ?? undefined}
+            >
+              {appServerInfo?.serverUserAgent ?? "--"}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Platform Family</span>
+            <strong
+              className="codex-runtime-value"
+              title={appServerInfo?.platformFamily ?? undefined}
+            >
+              {appServerInfo?.platformFamily ?? "--"}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Platform OS</span>
+            <strong className="codex-runtime-value" title={appServerInfo?.platformOs ?? undefined}>
+              {appServerInfo?.platformOs ?? "--"}
+            </strong>
           </div>
         </div>
         {appServerMessage ? <p className="codex-message">{appServerMessage}</p> : null}
@@ -499,8 +568,8 @@ export default function DashboardPage() {
         <div>
           <h2>Local-first foundation</h2>
           <p>
-            DEV-004 connects the App Server JSON-RPC transport while the protocol handshake remains
-            not initialized. Account and usage monitoring are not connected yet.
+            DEV-005 completes the App Server protocol handshake and records the server runtime
+            metadata. Account and usage monitoring are not connected yet.
           </p>
         </div>
       </section>

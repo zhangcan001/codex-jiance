@@ -24,6 +24,15 @@ pub enum AppServerStatus {
     Failed,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum ProtocolHandshakeStatus {
+    NotInitialized,
+    Initializing,
+    Initialized,
+    Failed,
+}
+
 #[derive(Debug, Clone, Serialize, PartialEq, Eq)]
 #[serde(rename_all = "camelCase")]
 pub struct AppServerStatusInfo {
@@ -33,5 +42,9 @@ pub struct AppServerStatusInfo {
     pub executable_path: Option<String>,
     pub transport: String,
     pub json_rpc_connected: bool,
+    pub handshake_status: ProtocolHandshakeStatus,
+    pub server_user_agent: Option<String>,
+    pub platform_family: Option<String>,
+    pub platform_os: Option<String>,
     pub last_error: Option<String>,
 }

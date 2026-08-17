@@ -17,6 +17,12 @@ export type AppServerStatus =
   | "stopping"
   | "failed";
 
+export type ProtocolHandshakeStatus =
+  | "notInitialized"
+  | "initializing"
+  | "initialized"
+  | "failed";
+
 export interface AppServerStatusInfo {
   status: AppServerStatus;
   pid: number | null;
@@ -24,5 +30,9 @@ export interface AppServerStatusInfo {
   executablePath: string | null;
   transport: string;
   jsonRpcConnected: boolean;
+  handshakeStatus: ProtocolHandshakeStatus;
+  serverUserAgent: string | null;
+  platformFamily: string | null;
+  platformOs: string | null;
   lastError: string | null;
 }

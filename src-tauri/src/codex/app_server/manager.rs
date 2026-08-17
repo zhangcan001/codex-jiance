@@ -9,13 +9,17 @@ use crate::{
         detector,
     },
     error::AppError,
-    models::codex::{AppServerStatus, AppServerStatusInfo},
+    models::codex::{AppServerStatus, AppServerStatusInfo, ProtocolHandshakeStatus},
 };
+
+use super::initialization::{perform_handshake, InitializationResult};
 
 struct AppServerInner {
     status: AppServerStatus,
     process: Option<AppServerProcess>,
     client: Option<Arc<JsonRpcClient>>,
+    handshake_status: ProtocolHandshakeStatus,
+    initialization_result: Option<InitializationResult>,
     last_error: Option<String>,
 }
 
@@ -32,6 +36,8 @@ impl AppServerManager {
                 status: AppServerStatus::Stopped,
                 process: None,
                 client: None,
+                handshake_status: ProtocolHandshakeStatus::NotInitialized,
+                initialization_result: None,
                 last_error: None,
             }),
         }
@@ -50,23 +56,48 @@ impl AppServerManager {
         }
 
         inner.status = AppServerStatus::Starting;
+        inner.handshake_status = ProtocolHandshakeStatus::NotInitialized;
+        inner.initialization_result = None;
         inner.last_error = None;
         drop(inner);
 
         log::info!("App Server starting");
         let result = match start_process().await {
-            Ok(process) => attach_client(process).await,
+            Ok(process) => match attach_client(process).await {
+                Ok((process, client)) => {
+                    {
+                        let mut inner = self.inner.lock().await;
+                        inner.handshake_status = ProtocolHandshakeStatus::Initializing;
+                    }
+
+                    match perform_handshake(&client).await {
+                        Ok(initialization_result) => Ok((process, client, initialization_result)),
+                        Err(error) => {
+                            client.shutdown().await;
+                            if let Err(cleanup_error) = stop_app_server(process).await {
+                                log::error!(
+                                    "App Server cleanup after handshake failure failed: {cleanup_error}"
+                                );
+                            }
+                            Err(error)
+                        }
+                    }
+                }
+                Err(error) => Err(error),
+            },
             Err(error) => Err(error),
         };
 
         let mut inner = self.inner.lock().await;
         match result {
-            Ok((process, client)) => {
+            Ok((process, client, initialization_result)) => {
                 log::info!("App Server started");
                 log::info!("App Server PID: {:?}", process.pid);
                 inner.process = Some(process);
                 inner.client = Some(client);
                 inner.status = AppServerStatus::Running;
+                inner.handshake_status = ProtocolHandshakeStatus::Initialized;
+                inner.initialization_result = Some(initialization_result);
                 inner.last_error = None;
                 Ok(snapshot(&inner))
             }
@@ -74,7 +105,15 @@ impl AppServerManager {
                 let message = error.to_string();
                 log::error!("App Server failed to start: {message}");
                 inner.process = None;
+                inner.client = None;
                 inner.status = AppServerStatus::Failed;
+                inner.handshake_status =
+                    if inner.handshake_status == ProtocolHandshakeStatus::Initializing {
+                        ProtocolHandshakeStatus::Failed
+                    } else {
+                        ProtocolHandshakeStatus::NotInitialized
+                    };
+                inner.initialization_result = None;
                 inner.last_error = Some(message);
                 Err(error)
             }
@@ -95,6 +134,8 @@ impl AppServerManager {
             let client = inner.client.take();
             let Some(process) = process else {
                 inner.status = AppServerStatus::Stopped;
+                inner.handshake_status = ProtocolHandshakeStatus::NotInitialized;
+                inner.initialization_result = None;
                 inner.last_error = None;
                 let status = snapshot(&inner);
                 drop(inner);
@@ -119,6 +160,8 @@ impl AppServerManager {
             Ok(()) => {
                 log::info!("App Server stopped");
                 inner.status = AppServerStatus::Stopped;
+                inner.handshake_status = ProtocolHandshakeStatus::NotInitialized;
+                inner.initialization_result = None;
                 inner.last_error = None;
                 Ok(snapshot(&inner))
             }
@@ -126,6 +169,8 @@ impl AppServerManager {
                 let message = error.to_string();
                 log::error!("App Server stop failed: {message}");
                 inner.status = AppServerStatus::Failed;
+                inner.handshake_status = ProtocolHandshakeStatus::Failed;
+                inner.initialization_result = None;
                 inner.last_error = Some(message);
                 Err(error)
             }
@@ -227,6 +272,12 @@ async fn refresh_locked(inner: &mut AppServerInner) -> Result<(), AppError> {
     } else {
         Some(format_exit_error(exit_status.code(), diagnostic))
     };
+    inner.handshake_status = if was_stopping {
+        ProtocolHandshakeStatus::NotInitialized
+    } else {
+        ProtocolHandshakeStatus::Failed
+    };
+    inner.initialization_result = None;
 
     if !was_stopping {
         log::error!("App Server exited unexpectedly: {:?}", inner.last_error);
@@ -249,6 +300,19 @@ fn snapshot(inner: &AppServerInner) -> AppServerStatusInfo {
             .map(|process| process.executable_path.to_string_lossy().into_owned()),
         transport: "stdio".to_owned(),
         json_rpc_connected,
+        handshake_status: inner.handshake_status,
+        server_user_agent: inner
+            .initialization_result
+            .as_ref()
+            .and_then(|result| result.user_agent.clone()),
+        platform_family: inner
+            .initialization_result
+            .as_ref()
+            .and_then(|result| result.platform_family.clone()),
+        platform_os: inner
+            .initialization_result
+            .as_ref()
+            .and_then(|result| result.platform_os.clone()),
         last_error: inner.last_error.clone(),
     }
 }
@@ -269,7 +333,7 @@ mod tests {
     use tokio::time::timeout;
 
     use super::AppServerManager;
-    use crate::models::codex::AppServerStatus;
+    use crate::models::codex::{AppServerStatus, ProtocolHandshakeStatus};
 
     #[tokio::test]
     async fn manager_starts_stopped() {
@@ -280,8 +344,20 @@ mod tests {
         assert_eq!(status.pid, None);
         assert_eq!(status.transport, "stdio");
         assert!(!status.json_rpc_connected);
+        assert_eq!(
+            status.handshake_status,
+            ProtocolHandshakeStatus::NotInitialized
+        );
+        assert_eq!(status.server_user_agent, None);
+        assert_eq!(status.platform_family, None);
+        assert_eq!(status.platform_os, None);
         let serialized = serde_json::to_value(&status).expect("status should serialize");
         assert_eq!(serialized["jsonRpcConnected"], false);
+        assert_eq!(serialized["handshakeStatus"], "notInitialized");
+        assert!(serialized.get("handshake_status").is_none());
+        assert!(serialized.get("serverUserAgent").is_some());
+        assert!(serialized.get("platformFamily").is_some());
+        assert!(serialized.get("platformOs").is_some());
         assert!(serialized.get("json_rpc_connected").is_none());
     }
 

@@ -39,6 +39,9 @@ pub enum AppError {
     #[error("App Server start failed: {0}")]
     AppServerStart(String),
 
+    #[error("App Server initialization failed: {0}")]
+    AppServerInitialization(String),
+
     #[error("App Server stop failed: {0}")]
     AppServerStop(String),
 
@@ -120,6 +123,10 @@ impl From<AppError> for CommandError {
             },
             AppError::AppServerStart(message) => Self {
                 code: "APP_SERVER_START_ERROR".to_owned(),
+                message,
+            },
+            AppError::AppServerInitialization(message) => Self {
+                code: "APP_SERVER_INITIALIZATION_ERROR".to_owned(),
                 message,
             },
             AppError::AppServerStop(message) => Self {

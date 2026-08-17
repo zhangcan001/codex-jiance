@@ -1,3 +1,4 @@
+mod initialization;
 pub mod json_rpc;
 mod manager;
 mod process;

@@ -1,10 +1,10 @@
 # Codex Usage Monitor
 
-Codex Usage Monitor is a Windows desktop application for local Codex usage monitoring. The current milestone keeps the DEV-002 CLI detection foundation, adds safe local Codex App Server lifecycle control, and connects the stdio pipes to a generic JSON-RPC transport client. Account and usage integration is intentionally not included yet.
+Codex Usage Monitor is a Windows desktop application for local Codex usage monitoring. The current milestone keeps the DEV-002 CLI detection foundation, adds safe local Codex App Server lifecycle control, connects the stdio pipes to a JSON-RPC transport client, and completes the App Server initialize/initialized handshake. Account and usage integration is intentionally not included yet.
 
 ## Current development stage
 
-`DEV-004 — Codex App Server JSON-RPC Client`
+`DEV-005 — App Server initialize / initialized handshake`
 
 ## Technology stack
 
@@ -88,7 +88,7 @@ On Windows the default database file is:
 
 The current migration creates `app_meta`, `settings`, and `schema_info`, and records schema version `1`.
 
-## DEV-004 currently provides
+## DEV-005 currently provides
 
 - Tauri desktop shell
 - React frontend
@@ -120,16 +120,20 @@ The current migration creates `app_meta`, `settings`, and `schema_info`, and rec
 - Request timeouts, EOF/disconnect cleanup, malformed-message handling, and bounded input lines
 - Explicit client shutdown integrated with App Server stop and application-exit cleanup
 - App Server status exposes whether the JSON-RPC transport is currently connected
+- Codex App Server `initialize` request with explicit client metadata
+- `initialized` notification sent only after a successful initialize response
+- Protocol handshake lifecycle state: not initialized, initializing, initialized, or failed
+- Server user-agent and runtime platform metadata from the initialize response
+- Complete process and JSON-RPC cleanup when initialization fails
+- One initialize handshake per transport connection, with a fresh handshake after restart
 
 ## Not implemented yet
 
-The JSON-RPC layer is transport-only. Initialization handshake is not implemented yet.
 Account information, rate limits, and token usage are not implemented yet.
-The transport can be connected while the Codex protocol handshake is still not initialized.
+The transport can be connected while the Codex protocol handshake is not initialized or after a later transport disconnect.
 
-The following remain intentionally out of scope for DEV-004:
+The following remain intentionally out of scope for DEV-005:
 
-- Initialization handshakes and account, rate-limit, or usage business calls
 - Account, authentication, rate-limit, token-usage, or credit data
 - Codex model calls, Threads, or Turns
 - API-equivalent cost calculation
@@ -140,4 +144,4 @@ The database schema remains at version `1`; App Server lifecycle state is kept i
 
 ## Next stage
 
-`DEV-005 — App Server initialize / initialized handshake`
+`DEV-006 — App Server schema compatibility and installed-version protocol validation`
