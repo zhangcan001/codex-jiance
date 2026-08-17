@@ -85,3 +85,27 @@ export interface CodexAccountInfo {
   updatedAt: number;
   message: string | null;
 }
+
+export type RateLimitStatus = "available" | "unavailable" | "error";
+
+export type RateLimitWindowKind = "primary" | "secondary";
+
+export interface RateLimitWindow {
+  limitId: string | null;
+  limitName: string | null;
+  windowKind: RateLimitWindowKind;
+  usedPercent: number;
+  remainingPercent: number;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+  planType: string | null;
+  rateLimitReachedType: string | null;
+}
+
+export interface RateLimitInfo {
+  status: RateLimitStatus;
+  windows: RateLimitWindow[];
+  resetCreditsAvailable: number | null;
+  updatedAt: number;
+  message: string | null;
+}

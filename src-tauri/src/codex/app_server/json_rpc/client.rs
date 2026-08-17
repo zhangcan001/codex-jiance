@@ -83,10 +83,25 @@ impl JsonRpcClient {
             .await
     }
 
+    pub(crate) async fn request_no_params(&self, method: &str) -> Result<Value, AppError> {
+        self.request_optional_params(method, None, DEFAULT_REQUEST_TIMEOUT)
+            .await
+    }
+
     pub(crate) async fn request_with_timeout(
         &self,
         method: &str,
         params: Value,
+        request_timeout: Duration,
+    ) -> Result<Value, AppError> {
+        self.request_optional_params(method, Some(params), request_timeout)
+            .await
+    }
+
+    pub(crate) async fn request_optional_params(
+        &self,
+        method: &str,
+        params: Option<Value>,
         request_timeout: Duration,
     ) -> Result<Value, AppError> {
         if !self.connected.load(Ordering::Acquire) {

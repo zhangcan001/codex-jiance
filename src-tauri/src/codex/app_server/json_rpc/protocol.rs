@@ -29,7 +29,8 @@ pub struct RpcServerRequest {
 pub(crate) struct RpcRequest {
     pub(crate) method: String,
     pub(crate) id: u64,
-    pub(crate) params: Value,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub(crate) params: Option<Value>,
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -175,12 +176,25 @@ mod tests {
         let request = serde_json::to_value(super::RpcRequest {
             method: "test".to_owned(),
             id: 1,
-            params: json!({ "value": 1 }),
+            params: Some(json!({ "value": 1 })),
         })
         .expect("request should serialize");
 
         assert!(request.get("jsonrpc").is_none());
         assert_eq!(request["id"], 1);
         assert_eq!(request["method"], "test");
+    }
+
+    #[test]
+    fn outbound_requests_can_omit_params() {
+        let request = serde_json::to_value(super::RpcRequest {
+            method: "account/rateLimits/read".to_owned(),
+            id: 2,
+            params: None,
+        })
+        .expect("request should serialize");
+
+        assert!(request.get("params").is_none());
+        assert!(request.get("jsonrpc").is_none());
     }
 }

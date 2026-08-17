@@ -11,6 +11,7 @@ import {
   getAppInfo,
   getCodexAccount,
   getCodexAppServerStatus,
+  getCodexRateLimits,
   getDatabaseStatus,
   healthCheck,
   startCodexAppServer,
@@ -23,6 +24,9 @@ import type {
   CodexAccountInfo,
   CodexInstallationInfo,
   ProtocolHandshakeStatus,
+  RateLimitInfo,
+  RateLimitStatus,
+  RateLimitWindow,
   SchemaCompatibilityReport,
   SchemaCompatibilityStatus,
 } from "../../types/codex";
@@ -241,6 +245,89 @@ function formatPlanType(planType: string | null): string {
   }
 }
 
+function getRateLimitStatusLabel(
+  status: RateLimitStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  if (error && !status) {
+    return "Error";
+  }
+
+  switch (status) {
+    case "available":
+      return "Available";
+    case "error":
+      return "Error";
+    case "unavailable":
+    default:
+      return "Unavailable";
+  }
+}
+
+function getRateLimitStatusVariant(
+  status: RateLimitStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): StatusVariant {
+  if (isLoading) {
+    return "warning";
+  }
+  if (error && !status) {
+    return "error";
+  }
+
+  switch (status) {
+    case "available":
+      return "success";
+    case "error":
+      return "error";
+    case "unavailable":
+    default:
+      return "neutral";
+  }
+}
+
+function formatRateLimitPercent(value: number): string {
+  return Number.isInteger(value) ? `${value}%` : `${value.toFixed(1)}%`;
+}
+
+function findRateLimitWindow(
+  info: RateLimitInfo | null,
+  durationMins: number,
+): RateLimitWindow | null {
+  return info?.windows.find((window) => window.windowDurationMins === durationMins) ?? null;
+}
+
+function rateLimitCardValue(
+  info: RateLimitInfo | null,
+  isLoading: boolean,
+  durationMins: number,
+): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  const window = findRateLimitWindow(info, durationMins);
+  return window ? `${formatRateLimitPercent(window.usedPercent)} used` : "Not reported";
+}
+
+function rateLimitCardSubtitle(
+  info: RateLimitInfo | null,
+  isLoading: boolean,
+  durationMins: number,
+): string {
+  if (isLoading) {
+    return "Reading official App Server data";
+  }
+  const window = findRateLimitWindow(info, durationMins);
+  return window
+    ? `${formatRateLimitPercent(window.remainingPercent)} remaining (derived) · Reset: ${formatStartedAt(window.resetsAt)}`
+    : "Official window not reported";
+}
+
 function getCompatibilityStatusLabel(
   status: SchemaCompatibilityStatus | null,
   isLoading: boolean,
@@ -333,10 +420,14 @@ export default function DashboardPage() {
   const [accountInfo, setAccountInfo] = useState<CodexAccountInfo | null>(null);
   const [accountError, setAccountError] = useState<string | null>(null);
   const [isAccountLoading, setIsAccountLoading] = useState(false);
+  const [rateLimitInfo, setRateLimitInfo] = useState<RateLimitInfo | null>(null);
+  const [rateLimitError, setRateLimitError] = useState<string | null>(null);
+  const [isRateLimitLoading, setIsRateLimitLoading] = useState(false);
   const hasLoadedCodexRef = useRef(false);
   const hasLoadedAppServerRef = useRef(false);
   const hasLoadedCompatibilityRef = useRef(false);
   const hasLoadedAccountRef = useRef(false);
+  const hasLoadedRateLimitRef = useRef(false);
 
   const loadSystemStatus = useCallback(async () => {
     setIsLoading(true);
@@ -416,6 +507,20 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadRateLimits = useCallback(async (force = false) => {
+    setIsRateLimitLoading(true);
+    setRateLimitError(null);
+
+    try {
+      setRateLimitInfo(await getCodexRateLimits(force));
+    } catch (loadError: unknown) {
+      setRateLimitInfo(null);
+      setRateLimitError(getErrorMessage(loadError));
+    } finally {
+      setIsRateLimitLoading(false);
+    }
+  }, []);
+
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
     setAppServerError(null);
@@ -492,6 +597,26 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadAccount]);
+
+  useEffect(() => {
+    if (!accountReady) {
+      hasLoadedRateLimitRef.current = false;
+      setRateLimitInfo(null);
+      setRateLimitError(null);
+      return;
+    }
+
+    if (!hasLoadedRateLimitRef.current) {
+      hasLoadedRateLimitRef.current = true;
+      void loadRateLimits();
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadRateLimits();
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [accountReady, loadRateLimits]);
 
   useEffect(() => {
     if (
@@ -625,6 +750,23 @@ export default function DashboardPage() {
   const accountMessage = accountReady
     ? accountError ?? visibleAccountInfo?.message
     : "Start the Codex App Server to read account information.";
+  const visibleRateLimitInfo = accountReady ? rateLimitInfo : null;
+  const rateLimitStatus = accountReady
+    ? visibleRateLimitInfo?.status ?? (rateLimitError ? "error" : null)
+    : "unavailable";
+  const rateLimitStatusLabel = getRateLimitStatusLabel(
+    rateLimitStatus,
+    isRateLimitLoading,
+    rateLimitError,
+  );
+  const rateLimitStatusVariant = getRateLimitStatusVariant(
+    rateLimitStatus,
+    isRateLimitLoading,
+    rateLimitError,
+  );
+  const rateLimitMessage = accountReady
+    ? rateLimitError ?? visibleRateLimitInfo?.message
+    : "Start the Codex App Server to read rate limits.";
 
   return (
     <div className="page page--dashboard">
@@ -652,16 +794,24 @@ export default function DashboardPage() {
       <section className="section-block" aria-labelledby="business-status-heading">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Future data sources</p>
+            <p className="section-kicker">Official App Server data</p>
             <h2 id="business-status-heading">Usage overview</h2>
           </div>
-          <StatusBadge variant="neutral">Placeholder data</StatusBadge>
+          <StatusBadge variant={rateLimitStatusVariant}>{rateLimitStatusLabel}</StatusBadge>
         </div>
         <div className="metric-grid metric-grid--four">
           <MetricCard title="Codex CLI" value={codexCardValue} subtitle={codexCardSubtitle} />
-          <PlaceholderCard title="5 Hour Usage" value="--" subtitle="Awaiting Codex integration" />
-          <PlaceholderCard title="Weekly Usage" value="--" subtitle="Awaiting Codex integration" />
-          <PlaceholderCard title="Today Tokens" value="--" subtitle="Awaiting Codex integration" />
+          <MetricCard
+            title="5 Hour Usage"
+            value={rateLimitCardValue(visibleRateLimitInfo, isRateLimitLoading, 300)}
+            subtitle={rateLimitCardSubtitle(visibleRateLimitInfo, isRateLimitLoading, 300)}
+          />
+          <MetricCard
+            title="Weekly Usage"
+            value={rateLimitCardValue(visibleRateLimitInfo, isRateLimitLoading, 10080)}
+            subtitle={rateLimitCardSubtitle(visibleRateLimitInfo, isRateLimitLoading, 10080)}
+          />
+          <PlaceholderCard title="Today Tokens" value="--" subtitle="Usage read arrives in DEV-011" />
         </div>
       </section>
 
@@ -957,6 +1107,89 @@ export default function DashboardPage() {
           </div>
         </div>
         {accountMessage ? <p className="codex-message">{accountMessage}</p> : null}
+      </section>
+
+      <section className="section-block" aria-labelledby="codex-rate-limits-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Official rate-limit windows</p>
+            <h2 id="codex-rate-limits-heading">Rate Limits</h2>
+          </div>
+          <div className="section-heading__actions">
+            <StatusBadge variant={rateLimitStatusVariant}>{rateLimitStatusLabel}</StatusBadge>
+            <button
+              className="button button--secondary button--compact"
+              type="button"
+              onClick={() => void loadRateLimits(true)}
+              disabled={!accountReady || isRateLimitLoading}
+            >
+              {isRateLimitLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+        <div className="codex-environment rate-limit-summary">
+          <div className="codex-row">
+            <span>Status</span>
+            <StatusBadge variant={rateLimitStatusVariant}>{rateLimitStatusLabel}</StatusBadge>
+          </div>
+          <div className="codex-row">
+            <span>Reset Credits Available</span>
+            <strong>
+              {visibleRateLimitInfo?.resetCreditsAvailable === null || !visibleRateLimitInfo
+                ? "--"
+                : visibleRateLimitInfo.resetCreditsAvailable}
+            </strong>
+          </div>
+        </div>
+        {visibleRateLimitInfo && visibleRateLimitInfo.windows.length > 0 ? (
+          <div className="rate-limit-window-list">
+            {visibleRateLimitInfo.windows.map((window, index) => (
+              <article
+                className="rate-limit-window"
+                key={`${window.limitId ?? "window"}-${window.windowKind}-${window.windowDurationMins ?? "unknown"}-${index}`}
+              >
+                <div>
+                  <span>Limit</span>
+                  <strong>{window.limitName ?? window.limitId ?? "--"}</strong>
+                </div>
+                <div>
+                  <span>Window</span>
+                  <strong>
+                    {window.windowKind === "primary" ? "Primary" : "Secondary"} ·{" "}
+                    {window.windowDurationMins === null
+                      ? "Not reported"
+                      : `${window.windowDurationMins} min`}
+                  </strong>
+                </div>
+                <div>
+                  <span>Used</span>
+                  <strong>{formatRateLimitPercent(window.usedPercent)}</strong>
+                </div>
+                <div>
+                  <span>Remaining (derived)</span>
+                  <strong>{formatRateLimitPercent(window.remainingPercent)}</strong>
+                </div>
+                <div>
+                  <span>Reset Time</span>
+                  <strong>{formatStartedAt(window.resetsAt)}</strong>
+                </div>
+                <div>
+                  <span>Plan</span>
+                  <strong>{formatPlanType(window.planType)}</strong>
+                </div>
+                <div>
+                  <span>Reached State</span>
+                  <strong>{window.rateLimitReachedType ?? "--"}</strong>
+                </div>
+              </article>
+            ))}
+          </div>
+        ) : (
+          <p className="codex-message">
+            {isRateLimitLoading ? "Reading official rate-limit windows..." : "No official rate-limit windows reported."}
+          </p>
+        )}
+        {rateLimitMessage ? <p className="codex-message">{rateLimitMessage}</p> : null}
       </section>
 
       <section className="section-block" aria-labelledby="system-status-heading">
