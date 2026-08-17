@@ -4,6 +4,7 @@ mod commands;
 mod database;
 mod error;
 mod models;
+pub mod pricing;
 mod rate_limit;
 mod state;
 mod usage;
