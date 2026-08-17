@@ -5,6 +5,7 @@ mod commands;
 mod database;
 mod error;
 mod models;
+mod prediction;
 pub mod pricing;
 mod rate_limit;
 mod state;
@@ -58,6 +59,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::get_codex_account,
             commands::codex::get_codex_rate_limits,
             commands::codex::get_codex_burn_rates,
+            commands::codex::get_codex_quota_predictions,
             commands::codex::get_codex_usage
         ])
         .on_window_event(|window, event| {

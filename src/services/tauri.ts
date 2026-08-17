@@ -7,6 +7,7 @@ import type {
   CodexInstallationInfo,
   CodexUsageInfo,
   RateLimitInfo,
+  QuotaPrediction,
   SchemaCompatibilityReport,
 } from "../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
@@ -94,6 +95,10 @@ export function getCodexRateLimits(force = false): Promise<RateLimitInfo> {
 
 export function getCodexBurnRates(force = false): Promise<BurnRateEstimate[]> {
   return invokeCommand<BurnRateEstimate[]>("get_codex_burn_rates", { force });
+}
+
+export function getCodexQuotaPredictions(force = false): Promise<QuotaPrediction[]> {
+  return invokeCommand<QuotaPrediction[]>("get_codex_quota_predictions", { force });
 }
 
 export function getCodexUsage(force = false): Promise<CodexUsageInfo> {

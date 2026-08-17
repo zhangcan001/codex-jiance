@@ -16,6 +16,7 @@ import {
   getCodexAccount,
   getCodexAppServerStatus,
   getCodexBurnRates,
+  getCodexQuotaPredictions,
   getCodexRateLimits,
   getCodexUsage,
   getDatabaseStatus,
@@ -28,6 +29,7 @@ import type {
   AppServerStatus,
   AppServerStatusInfo,
   BurnRateEstimate,
+  QuotaPrediction,
   CodexAccountInfo,
   CodexInstallationInfo,
   CodexUsageInfo,
@@ -366,6 +368,50 @@ function formatBurnRate(estimate: BurnRateEstimate | null, isLoading: boolean): 
   return `${estimate.burnRatePercentPointsPerHour.toFixed(1)} pp/hour`;
 }
 
+function findQuotaPrediction(
+  predictions: QuotaPrediction[],
+  durationMins: number,
+): QuotaPrediction | null {
+  return predictions.find((prediction) => prediction.windowDurationMins === durationMins) ?? null;
+}
+
+function formatDuration(seconds: number): string {
+  const totalMinutes = Math.max(1, Math.round(seconds / 60));
+  const hours = Math.floor(totalMinutes / 60);
+  const minutes = totalMinutes % 60;
+  return hours > 0 ? `${hours}h ${minutes}m` : `${minutes}m`;
+}
+
+function formatPrediction(prediction: QuotaPrediction | null, isLoading: boolean): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  if (!prediction) {
+    return "Insufficient data";
+  }
+  switch (prediction.outcome) {
+    case "depletionBeforeReset":
+      return prediction.secondsToDepletion === null
+        ? "Estimated depletion before reset"
+        : `Estimated depletion in ${formatDuration(prediction.secondsToDepletion)}`;
+    case "resetBeforeDepletion":
+      return "Reset likely before depletion";
+    case "alreadyDepleted":
+      return "Quota currently exhausted";
+    case "stable":
+      return "No depletion projected from current burn";
+    case "resetUnknown":
+      return "Reset time unknown";
+    case "unavailable":
+      return "Unavailable";
+    case "error":
+      return "Error";
+    case "insufficientData":
+    default:
+      return "Insufficient data";
+  }
+}
+
 function getUsageStatusLabel(
   status: UsageStatus | null,
   isLoading: boolean,
@@ -533,6 +579,9 @@ export default function DashboardPage() {
   const [burnRateEstimates, setBurnRateEstimates] = useState<BurnRateEstimate[]>([]);
   const [burnRateError, setBurnRateError] = useState<string | null>(null);
   const [isBurnRateLoading, setIsBurnRateLoading] = useState(false);
+  const [quotaPredictions, setQuotaPredictions] = useState<QuotaPrediction[]>([]);
+  const [predictionError, setPredictionError] = useState<string | null>(null);
+  const [isPredictionLoading, setIsPredictionLoading] = useState(false);
   const [usageInfo, setUsageInfo] = useState<CodexUsageInfo | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [isUsageLoading, setIsUsageLoading] = useState(false);
@@ -672,14 +721,29 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadQuotaPredictions = useCallback(async (force = false) => {
+    setIsPredictionLoading(true);
+    setPredictionError(null);
+
+    try {
+      setQuotaPredictions(await getCodexQuotaPredictions(force));
+    } catch (loadError: unknown) {
+      setQuotaPredictions([]);
+      setPredictionError(getErrorMessage(loadError));
+    } finally {
+      setIsPredictionLoading(false);
+    }
+  }, []);
+
   const refreshDashboardData = useCallback(async () => {
     await Promise.allSettled([
       loadAccount(true),
       loadRateLimits(true),
       loadUsage(true),
       loadBurnRates(true),
+      loadQuotaPredictions(true),
     ]);
-  }, [loadAccount, loadBurnRates, loadRateLimits, loadUsage]);
+  }, [loadAccount, loadBurnRates, loadRateLimits, loadQuotaPredictions, loadUsage]);
 
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
@@ -822,6 +886,21 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadBurnRates]);
+
+  useEffect(() => {
+    if (!accountReady) {
+      setQuotaPredictions([]);
+      setPredictionError(null);
+      return;
+    }
+
+    void loadQuotaPredictions();
+    const intervalId = window.setInterval(() => {
+      void loadQuotaPredictions();
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [accountReady, loadQuotaPredictions]);
 
   useEffect(() => {
     if (
@@ -1006,6 +1085,9 @@ export default function DashboardPage() {
   const visibleBurnRateEstimates = accountReady ? burnRateEstimates : [];
   const fiveHourBurnRate = findBurnRateEstimate(visibleBurnRateEstimates, 300);
   const weeklyBurnRate = findBurnRateEstimate(visibleBurnRateEstimates, 10080);
+  const visibleQuotaPredictions = accountReady ? quotaPredictions : [];
+  const fiveHourPrediction = findQuotaPrediction(visibleQuotaPredictions, 300);
+  const weeklyPrediction = findQuotaPrediction(visibleQuotaPredictions, 10080);
 
   return (
     <div className="page page--dashboard">
@@ -1155,7 +1237,31 @@ export default function DashboardPage() {
             label="Estimated"
           />
         </div>
-        {burnRateError ? <p className="codex-message">{burnRateError}</p> : null}
+        <div className="metric-grid metric-grid--two">
+          <MetricCard
+            title="5 Hour Projection"
+            value={formatPrediction(fiveHourPrediction, isPredictionLoading)}
+            subtitle={
+              fiveHourPrediction?.confidence
+                ? `Confidence: ${fiveHourPrediction.confidence}`
+                : "Estimated projection"
+            }
+            label="Estimated"
+          />
+          <MetricCard
+            title="Weekly Projection"
+            value={formatPrediction(weeklyPrediction, isPredictionLoading)}
+            subtitle={
+              weeklyPrediction?.confidence
+                ? `Confidence: ${weeklyPrediction.confidence}`
+                : "Estimated projection"
+            }
+            label="Estimated"
+          />
+        </div>
+        {burnRateError || predictionError ? (
+          <p className="codex-message">{burnRateError ?? predictionError}</p>
+        ) : null}
         {!accountReady ? (
           <p className="codex-message">Start the Codex App Server to estimate burn rate.</p>
         ) : null}

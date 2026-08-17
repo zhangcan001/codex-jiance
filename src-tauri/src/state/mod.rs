@@ -8,6 +8,7 @@ use crate::{
     burn_rate::BurnRateService,
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
+    prediction::QuotaPredictionService,
     rate_limit::{RateLimitRepository, RateLimitService},
     usage::UsageService,
 };
@@ -22,6 +23,7 @@ pub struct AppState {
     pub rate_limit_repository: Arc<RateLimitRepository>,
     pub rate_limit_service: Arc<RateLimitService>,
     pub burn_rate_service: Arc<BurnRateService>,
+    pub quota_prediction_service: Arc<QuotaPredictionService>,
     pub usage_service: Arc<UsageService>,
 }
 
@@ -44,6 +46,10 @@ impl AppState {
             Arc::clone(&rate_limit_service),
             Arc::clone(&rate_limit_repository),
         ));
+        let quota_prediction_service = Arc::new(QuotaPredictionService::new(
+            Arc::clone(&rate_limit_service),
+            Arc::clone(&burn_rate_service),
+        ));
         let usage_service = Arc::new(UsageService::new(
             Arc::clone(&app_server_manager),
             Arc::clone(&schema_compatibility_service),
@@ -59,6 +65,7 @@ impl AppState {
             rate_limit_repository,
             rate_limit_service,
             burn_rate_service,
+            quota_prediction_service,
             usage_service,
         }
     }

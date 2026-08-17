@@ -130,6 +130,35 @@ export interface BurnRateEstimate {
   message: string | null;
 }
 
+export type QuotaPredictionOutcome =
+  | "depletionBeforeReset"
+  | "resetBeforeDepletion"
+  | "alreadyDepleted"
+  | "stable"
+  | "insufficientData"
+  | "resetUnknown"
+  | "unavailable"
+  | "error";
+
+export type PredictionConfidence = "low" | "medium" | "high";
+
+export interface QuotaPrediction {
+  outcome: QuotaPredictionOutcome;
+  limitId: string | null;
+  limitName: string | null;
+  windowKind: RateLimitWindowKind | null;
+  windowDurationMins: number | null;
+  usedPercent: number | null;
+  burnRatePercentPointsPerHour: number | null;
+  estimatedDepletionAt: number | null;
+  secondsToDepletion: number | null;
+  resetsAt: number | null;
+  confidence: PredictionConfidence;
+  trustClass: "estimated";
+  calculatedAt: number;
+  message: string | null;
+}
+
 export type UsageStatus = "available" | "unavailable" | "error";
 
 export interface UsageSummary {

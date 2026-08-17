@@ -4,6 +4,7 @@ use crate::{
     codex,
     error::CommandResult,
     models::codex::{AppServerStatusInfo, CodexInstallationInfo, SchemaCompatibilityReport},
+    prediction::QuotaPrediction,
     rate_limit::RateLimitInfo,
     state::AppState,
     usage::CodexUsageInfo,
@@ -66,6 +67,14 @@ pub async fn get_codex_burn_rates(
     force: bool,
 ) -> CommandResult<Vec<BurnRateEstimate>> {
     Ok(state.burn_rate_service.get_burn_rates(force).await)
+}
+
+#[tauri::command]
+pub async fn get_codex_quota_predictions(
+    state: State<'_, AppState>,
+    force: bool,
+) -> CommandResult<Vec<QuotaPrediction>> {
+    Ok(state.quota_prediction_service.get_predictions(force).await)
 }
 
 #[tauri::command]
