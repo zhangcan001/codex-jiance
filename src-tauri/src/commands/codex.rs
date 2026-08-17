@@ -5,6 +5,7 @@ use crate::{
     models::codex::{AppServerStatusInfo, CodexInstallationInfo, SchemaCompatibilityReport},
     rate_limit::RateLimitInfo,
     state::AppState,
+    usage::CodexUsageInfo,
 };
 use tauri::State;
 
@@ -56,4 +57,12 @@ pub async fn get_codex_rate_limits(
     force: bool,
 ) -> CommandResult<RateLimitInfo> {
     Ok(state.rate_limit_service.get_rate_limits(force).await)
+}
+
+#[tauri::command]
+pub async fn get_codex_usage(
+    state: State<'_, AppState>,
+    force: bool,
+) -> CommandResult<CodexUsageInfo> {
+    Ok(state.usage_service.get_usage(force).await)
 }

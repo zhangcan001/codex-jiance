@@ -6,6 +6,7 @@ mod error;
 mod models;
 mod rate_limit;
 mod state;
+mod usage;
 
 use error::AppError;
 use state::AppState;
@@ -51,16 +52,18 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::get_codex_app_server_status,
             commands::codex::check_codex_schema_compatibility,
             commands::codex::get_codex_account,
-            commands::codex::get_codex_rate_limits
+            commands::codex::get_codex_rate_limits,
+            commands::codex::get_codex_usage
         ])
         .build(tauri::generate_context!())?;
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
             log::info!(
-                "Application exit received; cleaning up Rate Limit, Account, and App Server"
+                "Application exit received; cleaning up Usage, Rate Limit, Account, and App Server"
             );
             let state = app_handle.state::<AppState>();
+            tauri::async_runtime::block_on(state.usage_service.shutdown());
             tauri::async_runtime::block_on(state.rate_limit_service.shutdown());
             tauri::async_runtime::block_on(state.account_service.shutdown());
             if let Err(error) = tauri::async_runtime::block_on(state.app_server_manager.shutdown())

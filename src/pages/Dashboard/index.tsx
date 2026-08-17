@@ -4,7 +4,6 @@ import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
 import { StatusBadge, type StatusVariant } from "../../components/common/StatusBadge";
 import { MetricCard } from "../../components/dashboard/MetricCard";
-import { PlaceholderCard } from "../../components/dashboard/PlaceholderCard";
 import {
   detectCodexEnvironment,
   checkCodexSchemaCompatibility,
@@ -12,6 +11,7 @@ import {
   getCodexAccount,
   getCodexAppServerStatus,
   getCodexRateLimits,
+  getCodexUsage,
   getDatabaseStatus,
   healthCheck,
   startCodexAppServer,
@@ -23,12 +23,14 @@ import type {
   AppServerStatusInfo,
   CodexAccountInfo,
   CodexInstallationInfo,
+  CodexUsageInfo,
   ProtocolHandshakeStatus,
   RateLimitInfo,
   RateLimitStatus,
   RateLimitWindow,
   SchemaCompatibilityReport,
   SchemaCompatibilityStatus,
+  UsageStatus,
 } from "../../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../../types/system";
 
@@ -328,6 +330,75 @@ function rateLimitCardSubtitle(
     : "Official window not reported";
 }
 
+function getUsageStatusLabel(
+  status: UsageStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  if (error && !status) {
+    return "Error";
+  }
+
+  switch (status) {
+    case "available":
+      return "Available";
+    case "error":
+      return "Error";
+    case "unavailable":
+    default:
+      return "Unavailable";
+  }
+}
+
+function getUsageStatusVariant(
+  status: UsageStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): StatusVariant {
+  if (isLoading) {
+    return "warning";
+  }
+  if (error && !status) {
+    return "error";
+  }
+
+  switch (status) {
+    case "available":
+      return "success";
+    case "error":
+      return "error";
+    case "unavailable":
+    default:
+      return "neutral";
+  }
+}
+
+function formatUsageNumber(value: number | null | undefined): string {
+  return value === null || value === undefined ? "--" : value.toLocaleString();
+}
+
+function formatLocalDate(date: Date): string {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  const day = String(date.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function getTodayTokens(info: CodexUsageInfo | null): string {
+  const today = formatLocalDate(new Date());
+  const bucket = info?.dailyBuckets.find((entry) => entry.startDate === today);
+  return bucket ? formatUsageNumber(bucket.tokens) : "--";
+}
+
+function getRecentUsageBuckets(info: CodexUsageInfo | null) {
+  return [...(info?.dailyBuckets ?? [])]
+    .sort((left, right) => right.startDate.localeCompare(left.startDate))
+    .slice(0, 7);
+}
+
 function getCompatibilityStatusLabel(
   status: SchemaCompatibilityStatus | null,
   isLoading: boolean,
@@ -423,11 +494,15 @@ export default function DashboardPage() {
   const [rateLimitInfo, setRateLimitInfo] = useState<RateLimitInfo | null>(null);
   const [rateLimitError, setRateLimitError] = useState<string | null>(null);
   const [isRateLimitLoading, setIsRateLimitLoading] = useState(false);
+  const [usageInfo, setUsageInfo] = useState<CodexUsageInfo | null>(null);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [isUsageLoading, setIsUsageLoading] = useState(false);
   const hasLoadedCodexRef = useRef(false);
   const hasLoadedAppServerRef = useRef(false);
   const hasLoadedCompatibilityRef = useRef(false);
   const hasLoadedAccountRef = useRef(false);
   const hasLoadedRateLimitRef = useRef(false);
+  const hasLoadedUsageRef = useRef(false);
 
   const loadSystemStatus = useCallback(async () => {
     setIsLoading(true);
@@ -518,6 +593,20 @@ export default function DashboardPage() {
       setRateLimitError(getErrorMessage(loadError));
     } finally {
       setIsRateLimitLoading(false);
+    }
+  }, []);
+
+  const loadUsage = useCallback(async (force = false) => {
+    setIsUsageLoading(true);
+    setUsageError(null);
+
+    try {
+      setUsageInfo(await getCodexUsage(force));
+    } catch (loadError: unknown) {
+      setUsageInfo(null);
+      setUsageError(getErrorMessage(loadError));
+    } finally {
+      setIsUsageLoading(false);
     }
   }, []);
 
@@ -617,6 +706,26 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadRateLimits]);
+
+  useEffect(() => {
+    if (!accountReady) {
+      hasLoadedUsageRef.current = false;
+      setUsageInfo(null);
+      setUsageError(null);
+      return;
+    }
+
+    if (!hasLoadedUsageRef.current) {
+      hasLoadedUsageRef.current = true;
+      void loadUsage();
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadUsage();
+    }, 300_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [accountReady, loadUsage]);
 
   useEffect(() => {
     if (
@@ -767,6 +876,16 @@ export default function DashboardPage() {
   const rateLimitMessage = accountReady
     ? rateLimitError ?? visibleRateLimitInfo?.message
     : "Start the Codex App Server to read rate limits.";
+  const visibleUsageInfo = accountReady ? usageInfo : null;
+  const usageStatus = accountReady
+    ? visibleUsageInfo?.status ?? (usageError ? "error" : null)
+    : "unavailable";
+  const usageStatusLabel = getUsageStatusLabel(usageStatus, isUsageLoading, usageError);
+  const usageStatusVariant = getUsageStatusVariant(usageStatus, isUsageLoading, usageError);
+  const usageMessage = accountReady
+    ? usageError ?? visibleUsageInfo?.message
+    : "Start the Codex App Server to read usage information.";
+  const recentUsageBuckets = getRecentUsageBuckets(visibleUsageInfo);
 
   return (
     <div className="page page--dashboard">
@@ -811,7 +930,11 @@ export default function DashboardPage() {
             value={rateLimitCardValue(visibleRateLimitInfo, isRateLimitLoading, 10080)}
             subtitle={rateLimitCardSubtitle(visibleRateLimitInfo, isRateLimitLoading, 10080)}
           />
-          <PlaceholderCard title="Today Tokens" value="--" subtitle="Usage read arrives in DEV-011" />
+          <MetricCard
+            title="Today Tokens"
+            value={isUsageLoading ? "Checking..." : getTodayTokens(visibleUsageInfo)}
+            subtitle="Official daily bucket · local date"
+          />
         </div>
       </section>
 
@@ -1190,6 +1313,82 @@ export default function DashboardPage() {
           </p>
         )}
         {rateLimitMessage ? <p className="codex-message">{rateLimitMessage}</p> : null}
+      </section>
+
+      <section className="section-block" aria-labelledby="codex-usage-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Official token activity</p>
+            <h2 id="codex-usage-heading">Usage Details</h2>
+          </div>
+          <div className="section-heading__actions">
+            <StatusBadge variant={usageStatusVariant}>{usageStatusLabel}</StatusBadge>
+            <button
+              className="button button--secondary button--compact"
+              type="button"
+              onClick={() => void loadUsage(true)}
+              disabled={!accountReady || isUsageLoading}
+            >
+              {isUsageLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+        <div className="codex-environment usage-summary">
+          <div className="codex-row">
+            <span>Lifetime Tokens</span>
+            <strong>{formatUsageNumber(visibleUsageInfo?.summary?.lifetimeTokens)}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Peak Daily Tokens</span>
+            <strong>{formatUsageNumber(visibleUsageInfo?.summary?.peakDailyTokens)}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Longest Running Turn</span>
+            <strong>
+              {visibleUsageInfo?.summary?.longestRunningTurnSec === null ||
+              visibleUsageInfo?.summary?.longestRunningTurnSec === undefined
+                ? "--"
+                : `${formatUsageNumber(visibleUsageInfo.summary.longestRunningTurnSec)} sec`}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Current Streak</span>
+            <strong>
+              {visibleUsageInfo?.summary?.currentStreakDays === null ||
+              visibleUsageInfo?.summary?.currentStreakDays === undefined
+                ? "--"
+                : `${formatUsageNumber(visibleUsageInfo.summary.currentStreakDays)} days`}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Longest Streak</span>
+            <strong>
+              {visibleUsageInfo?.summary?.longestStreakDays === null ||
+              visibleUsageInfo?.summary?.longestStreakDays === undefined
+                ? "--"
+                : `${formatUsageNumber(visibleUsageInfo.summary.longestStreakDays)} days`}
+            </strong>
+          </div>
+        </div>
+        <div className="usage-bucket-list" aria-label="Recent daily usage buckets">
+          <div className="usage-bucket usage-bucket--header">
+            <span>Date</span>
+            <span>Tokens</span>
+          </div>
+          {recentUsageBuckets.length > 0 ? (
+            recentUsageBuckets.map((bucket) => (
+              <div className="usage-bucket" key={bucket.startDate}>
+                <strong>{bucket.startDate}</strong>
+                <strong>{formatUsageNumber(bucket.tokens)}</strong>
+              </div>
+            ))
+          ) : (
+            <p className="codex-message">
+              {isUsageLoading ? "Reading official usage buckets..." : "No daily usage buckets reported."}
+            </p>
+          )}
+        </div>
+        {usageMessage ? <p className="codex-message">{usageMessage}</p> : null}
       </section>
 
       <section className="section-block" aria-labelledby="system-status-heading">

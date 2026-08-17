@@ -109,3 +109,26 @@ export interface RateLimitInfo {
   updatedAt: number;
   message: string | null;
 }
+
+export type UsageStatus = "available" | "unavailable" | "error";
+
+export interface UsageSummary {
+  lifetimeTokens: number | null;
+  peakDailyTokens: number | null;
+  longestRunningTurnSec: number | null;
+  currentStreakDays: number | null;
+  longestStreakDays: number | null;
+}
+
+export interface DailyUsageBucket {
+  startDate: string;
+  tokens: number;
+}
+
+export interface CodexUsageInfo {
+  status: UsageStatus;
+  summary: UsageSummary | null;
+  dailyBuckets: DailyUsageBucket[];
+  updatedAt: number;
+  message: string | null;
+}

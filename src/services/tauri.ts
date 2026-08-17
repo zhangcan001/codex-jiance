@@ -4,6 +4,7 @@ import type {
   AppServerStatusInfo,
   CodexAccountInfo,
   CodexInstallationInfo,
+  CodexUsageInfo,
   RateLimitInfo,
   SchemaCompatibilityReport,
 } from "../types/codex";
@@ -88,4 +89,8 @@ export function getCodexAccount(force = false): Promise<CodexAccountInfo> {
 
 export function getCodexRateLimits(force = false): Promise<RateLimitInfo> {
   return invokeCommand<RateLimitInfo>("get_codex_rate_limits", { force });
+}
+
+export function getCodexUsage(force = false): Promise<CodexUsageInfo> {
+  return invokeCommand<CodexUsageInfo>("get_codex_usage", { force });
 }

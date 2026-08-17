@@ -8,6 +8,7 @@ use crate::{
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
     rate_limit::{RateLimitRepository, RateLimitService},
+    usage::UsageService,
 };
 
 pub struct AppState {
@@ -17,6 +18,7 @@ pub struct AppState {
     pub schema_compatibility_service: Arc<SchemaCompatibilityService>,
     pub account_service: Arc<AccountService>,
     pub rate_limit_service: Arc<RateLimitService>,
+    pub usage_service: Arc<UsageService>,
 }
 
 impl AppState {
@@ -34,6 +36,11 @@ impl AppState {
             Arc::clone(&account_service),
             rate_limit_repository,
         ));
+        let usage_service = Arc::new(UsageService::new(
+            Arc::clone(&app_server_manager),
+            Arc::clone(&schema_compatibility_service),
+            Arc::clone(&account_service),
+        ));
 
         Self {
             db_pool: database.pool,
@@ -42,6 +49,7 @@ impl AppState {
             schema_compatibility_service,
             account_service,
             rate_limit_service,
+            usage_service,
         }
     }
 }
