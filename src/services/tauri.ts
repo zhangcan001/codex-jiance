@@ -13,6 +13,7 @@ import type {
   ThreadUsageInfo,
   ProjectUsageReport,
   ModelUsageReport,
+  MonitoringHistory,
 } from "../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
 
@@ -127,4 +128,8 @@ export function getProjectUsage(startAt?: number, endAt?: number): Promise<Proje
 
 export function getModelUsage(startAt?: number, endAt?: number): Promise<ModelUsageReport> {
   return invokeCommand<ModelUsageReport>("get_model_usage", { startAt, endAt });
+}
+
+export function getMonitoringHistory(startAt?: number, endAt?: number): Promise<MonitoringHistory> {
+  return invokeCommand<MonitoringHistory>("get_monitoring_history", { startAt, endAt });
 }

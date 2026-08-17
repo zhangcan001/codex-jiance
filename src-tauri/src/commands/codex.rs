@@ -4,6 +4,7 @@ use crate::{
     burn_rate::BurnRateEstimate,
     codex,
     error::CommandResult,
+    history::MonitoringHistory,
     model_usage::ModelUsageReport,
     models::codex::{AppServerStatusInfo, CodexInstallationInfo, SchemaCompatibilityReport},
     prediction::QuotaPrediction,
@@ -131,6 +132,19 @@ pub async fn get_model_usage(
     state
         .model_usage_service
         .get_usage(start_at, end_at)
+        .await
+        .map_err(Into::into)
+}
+
+#[tauri::command]
+pub async fn get_monitoring_history(
+    state: State<'_, AppState>,
+    start_at: Option<i64>,
+    end_at: Option<i64>,
+) -> CommandResult<MonitoringHistory> {
+    state
+        .history_service
+        .get_history(start_at, end_at)
         .await
         .map_err(Into::into)
 }

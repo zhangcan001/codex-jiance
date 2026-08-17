@@ -35,6 +35,19 @@ pub(crate) struct PersistedTokenSnapshot {
     pub(crate) delta_event: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TokenHistoryPoint {
+    pub(crate) observed_at: i64,
+    pub(crate) delta_total_tokens: u64,
+    pub(crate) delta_input_tokens: u64,
+    pub(crate) delta_cached_input_tokens: u64,
+    pub(crate) delta_cache_write_input_tokens: u64,
+    pub(crate) delta_output_tokens: u64,
+    pub(crate) delta_reasoning_output_tokens: u64,
+    pub(crate) project_key: Option<String>,
+    pub(crate) model_id: Option<String>,
+}
+
 #[derive(Clone)]
 pub(crate) struct ThreadUsageRepository {
     pub(crate) pool: SqlitePool,
@@ -362,6 +375,98 @@ impl ThreadUsageRepository {
             snapshots as usize,
             deltas as usize,
             latest,
+        ))
+    }
+
+    pub(crate) async fn history_points(
+        &self,
+        start_at: Option<i64>,
+        end_at: Option<i64>,
+        max_points: usize,
+    ) -> Result<Vec<TokenHistoryPoint>, AppError> {
+        let limit = i64::try_from(max_points.min(2_000)).unwrap_or(2_000);
+        let rows = sqlx::query(
+            "SELECT observed_at, delta_total_tokens, delta_input_tokens,
+                    delta_cached_input_tokens, delta_cache_write_input_tokens,
+                    delta_output_tokens, delta_reasoning_output_tokens, project_key, model_id
+             FROM thread_token_snapshots
+             WHERE delta_total_tokens IS NOT NULL
+               AND (? IS NULL OR observed_at >= ?)
+               AND (? IS NULL OR observed_at < ?)
+             ORDER BY observed_at ASC, id ASC LIMIT ?",
+        )
+        .bind(start_at)
+        .bind(start_at)
+        .bind(end_at)
+        .bind(end_at)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(TokenHistoryPoint {
+                    observed_at: row.try_get("observed_at")?,
+                    delta_total_tokens: non_negative(
+                        row.try_get("delta_total_tokens")?,
+                        "delta total tokens",
+                    )?,
+                    delta_input_tokens: non_negative(
+                        row.try_get("delta_input_tokens")?,
+                        "delta input tokens",
+                    )?,
+                    delta_cached_input_tokens: non_negative(
+                        row.try_get("delta_cached_input_tokens")?,
+                        "delta cached input tokens",
+                    )?,
+                    delta_cache_write_input_tokens: non_negative(
+                        row.try_get("delta_cache_write_input_tokens")?,
+                        "delta cache write input tokens",
+                    )?,
+                    delta_output_tokens: non_negative(
+                        row.try_get("delta_output_tokens")?,
+                        "delta output tokens",
+                    )?,
+                    delta_reasoning_output_tokens: non_negative(
+                        row.try_get("delta_reasoning_output_tokens")?,
+                        "delta reasoning output tokens",
+                    )?,
+                    project_key: row.try_get("project_key")?,
+                    model_id: row.try_get("model_id")?,
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) async fn history_coverage(
+        &self,
+        start_at: Option<i64>,
+        end_at: Option<i64>,
+    ) -> Result<(usize, usize, usize, usize, usize), AppError> {
+        let row = sqlx::query(
+            "SELECT COUNT(DISTINCT thread_id) AS observed_threads,
+                    SUM(CASE WHEN delta_total_tokens IS NOT NULL THEN 1 ELSE 0 END) AS delta_events,
+                    SUM(CASE WHEN baseline_only=1 THEN 1 ELSE 0 END) AS baseline_events,
+                    SUM(CASE WHEN delta_total_tokens IS NOT NULL AND (project_key IS NULL OR project_key='unknown') THEN 1 ELSE 0 END) AS unknown_projects,
+                    SUM(CASE WHEN delta_total_tokens IS NOT NULL AND model_id IS NULL THEN 1 ELSE 0 END) AS unknown_models
+             FROM thread_token_snapshots
+             WHERE (? IS NULL OR observed_at >= ?)
+               AND (? IS NULL OR observed_at < ?)",
+        )
+        .bind(start_at)
+        .bind(start_at)
+        .bind(end_at)
+        .bind(end_at)
+        .fetch_one(&self.pool)
+        .await?;
+        Ok((
+            row.try_get::<i64, _>("observed_threads")? as usize,
+            row.try_get::<Option<i64>, _>("delta_events")?.unwrap_or(0) as usize,
+            row.try_get::<Option<i64>, _>("baseline_events")?
+                .unwrap_or(0) as usize,
+            row.try_get::<Option<i64>, _>("unknown_projects")?
+                .unwrap_or(0) as usize,
+            row.try_get::<Option<i64>, _>("unknown_models")?
+                .unwrap_or(0) as usize,
         ))
     }
 }

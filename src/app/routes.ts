@@ -1,4 +1,4 @@
-export type RouteKey = "overview" | "projects" | "models" | "settings";
+export type RouteKey = "overview" | "projects" | "models" | "history" | "settings";
 
 export interface RouteDefinition {
   key: RouteKey;
@@ -27,6 +27,11 @@ export const routes: Record<RouteKey, RouteDefinition> = {
     label: "Models",
     description: "Observed token usage by model",
   },
+  history: {
+    key: "history",
+    label: "History",
+    description: "Observed usage history",
+  },
 };
 
 export interface NavigationItem {
@@ -42,6 +47,6 @@ export const navigationItems: NavigationItem[] = [
   { key: "limits", label: "Limits", enabled: false },
   { key: "projects", label: "Projects", route: "projects", enabled: true },
   { key: "models", label: "Models", route: "models", enabled: true },
-  { key: "history", label: "History", enabled: false },
+  { key: "history", label: "History", route: "history", enabled: true },
   { key: "settings", label: "Settings", route: "settings", enabled: true },
 ];

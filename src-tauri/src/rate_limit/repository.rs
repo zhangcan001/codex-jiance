@@ -5,8 +5,7 @@ use crate::{
     account::unix_timestamp,
     error::AppError,
     rate_limit::model::{
-        RateLimitHistorySample, RateLimitInfo, RateLimitStatus, RateLimitWindow,
-        RateLimitWindowKind,
+        RateLimitHistorySample, RateLimitInfo, RateLimitStatus, RateLimitWindowKind,
     },
 };
 
@@ -17,7 +16,17 @@ pub(crate) enum PersistResult {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-#[allow(dead_code)]
+pub(crate) struct RateLimitHistoryPoint {
+    pub(crate) captured_at: i64,
+    pub(crate) limit_id: Option<String>,
+    pub(crate) window_kind: String,
+    pub(crate) duration: Option<i64>,
+    pub(crate) used_percent: f64,
+    pub(crate) resets_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+#[cfg(test)]
 pub(crate) struct PersistedRateLimitSnapshot {
     pub(crate) id: i64,
     pub(crate) captured_at: i64,
@@ -119,7 +128,7 @@ impl RateLimitRepository {
         Ok(PersistResult::Inserted(snapshot_id))
     }
 
-    #[allow(dead_code)]
+    #[cfg(test)]
     pub(crate) async fn latest_snapshot(
         &self,
     ) -> Result<Option<PersistedRateLimitSnapshot>, AppError> {
@@ -212,6 +221,43 @@ impl RateLimitRepository {
         }
         Ok(samples)
     }
+
+    pub(crate) async fn history_for_range(
+        &self,
+        start_at: Option<i64>,
+        end_at: Option<i64>,
+        max_points: usize,
+    ) -> Result<Vec<RateLimitHistoryPoint>, AppError> {
+        let limit = i64::try_from(max_points.min(2_000)).unwrap_or(2_000);
+        let rows = sqlx::query(
+            "SELECT s.captured_at, w.limit_id, w.window_kind, w.window_duration_mins,
+                    w.used_percent, w.resets_at
+             FROM rate_limit_snapshots AS s
+             INNER JOIN rate_limit_windows AS w ON w.snapshot_id=s.id
+             WHERE (? IS NULL OR s.captured_at >= ?)
+               AND (? IS NULL OR s.captured_at < ?)
+             ORDER BY s.captured_at ASC, s.id ASC, w.id ASC LIMIT ?",
+        )
+        .bind(start_at)
+        .bind(start_at)
+        .bind(end_at)
+        .bind(end_at)
+        .bind(limit)
+        .fetch_all(&self.pool)
+        .await?;
+        rows.into_iter()
+            .map(|row| {
+                Ok(RateLimitHistoryPoint {
+                    captured_at: row.try_get("captured_at")?,
+                    limit_id: row.try_get("limit_id")?,
+                    window_kind: row.try_get("window_kind")?,
+                    duration: row.try_get("window_duration_mins")?,
+                    used_percent: row.try_get("used_percent")?,
+                    resets_at: row.try_get("resets_at")?,
+                })
+            })
+            .collect()
+    }
 }
 
 #[derive(Serialize)]
@@ -291,13 +337,13 @@ fn window_kind_name(kind: RateLimitWindowKind) -> &'static str {
     }
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn sqlite_i64_to_u64(value: i64) -> Result<u64, AppError> {
     u64::try_from(value)
         .map_err(|_| AppError::InvalidState("Stored reset credit count is invalid.".to_owned()))
 }
 
-#[allow(dead_code)]
+#[cfg(test)]
 fn rate_limit_window_from_row(row: sqlx::sqlite::SqliteRow) -> Result<RateLimitWindow, AppError> {
     let window_kind = match row.try_get::<String, _>("window_kind")?.as_str() {
         "primary" => RateLimitWindowKind::Primary,
@@ -328,7 +374,7 @@ mod tests {
     use super::*;
     use crate::{
         database::{connection::create_pool, migrations},
-        rate_limit::model::RateLimitWindowKind,
+        rate_limit::model::{RateLimitWindow, RateLimitWindowKind},
     };
 
     fn window(

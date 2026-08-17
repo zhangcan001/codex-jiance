@@ -9,6 +9,7 @@ use crate::{
     burn_rate::BurnRateService,
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
+    history::HistoryService,
     model_usage::ModelUsageService,
     prediction::QuotaPredictionService,
     project::ProjectService,
@@ -23,8 +24,6 @@ pub struct AppState {
     pub app_server_manager: Arc<AppServerManager>,
     pub schema_compatibility_service: Arc<SchemaCompatibilityService>,
     pub account_service: Arc<AccountService>,
-    #[allow(dead_code)]
-    pub rate_limit_repository: Arc<RateLimitRepository>,
     pub rate_limit_service: Arc<RateLimitService>,
     pub burn_rate_service: Arc<BurnRateService>,
     pub quota_prediction_service: Arc<QuotaPredictionService>,
@@ -33,6 +32,7 @@ pub struct AppState {
     pub thread_usage_service: Arc<ThreadUsageService>,
     pub project_service: Arc<ProjectService>,
     pub model_usage_service: Arc<ModelUsageService>,
+    pub history_service: Arc<HistoryService>,
 }
 
 impl AppState {
@@ -75,7 +75,14 @@ impl AppState {
             Arc::clone(&thread_usage_repository),
         ));
         let project_service = Arc::new(ProjectService::new(Arc::clone(&thread_usage_repository)));
-        let model_usage_service = Arc::new(ModelUsageService::new(thread_usage_repository));
+        let model_usage_service =
+            Arc::new(ModelUsageService::new(Arc::clone(&thread_usage_repository)));
+        let history_service = Arc::new(HistoryService::new(
+            Arc::clone(&rate_limit_repository),
+            Arc::clone(&thread_usage_repository),
+            Arc::clone(&project_service),
+            Arc::clone(&model_usage_service),
+        ));
 
         Self {
             db_pool: database.pool,
@@ -83,7 +90,6 @@ impl AppState {
             app_server_manager,
             schema_compatibility_service,
             account_service,
-            rate_limit_repository,
             rate_limit_service,
             burn_rate_service,
             quota_prediction_service,
@@ -92,6 +98,7 @@ impl AppState {
             thread_usage_service,
             project_service,
             model_usage_service,
+            history_service,
         }
     }
 }

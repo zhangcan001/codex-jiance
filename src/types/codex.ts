@@ -291,3 +291,44 @@ export interface ModelUsageReport {
   startAt: number | null;
   endAt: number | null;
 }
+
+export interface RateLimitHistoryPoint {
+  capturedAt: number;
+  limitId: string | null;
+  kind: string;
+  duration: number | null;
+  usedPercent: number;
+  resetsAt: number | null;
+}
+
+export interface TokenHistoryPoint {
+  observedAt: number;
+  deltaTotalTokens: number;
+  deltaInputTokens: number;
+  deltaCachedInputTokens: number;
+  deltaCacheWriteInputTokens: number;
+  deltaOutputTokens: number;
+  deltaReasoningOutputTokens: number;
+  projectKey: string | null;
+  modelId: string | null;
+}
+
+export interface HistoryCoverage {
+  threadUsage: string;
+  observedThreads: number;
+  deltaEvents: number;
+  baselineEvents: number;
+  unknownProjectEvents: number;
+  unknownModelEvents: number;
+  pricingCoveragePercent: number;
+}
+
+export interface MonitoringHistory {
+  rateLimitSeries: RateLimitHistoryPoint[];
+  tokenSeries: TokenHistoryPoint[];
+  projectSummary: ProjectUsageAggregate[];
+  modelSummary: ModelUsageAggregate[];
+  coverage: HistoryCoverage;
+  startAt: number | null;
+  endAt: number | null;
+}

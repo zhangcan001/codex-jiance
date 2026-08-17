@@ -4,7 +4,7 @@ Codex Usage Monitor is a Windows desktop application for local Codex usage monit
 
 ## Current development stage
 
-`DEV-018 — Native Quota Alerts`
+`DEV-022 — History Dashboard`
 
 ## Technology stack
 
@@ -62,7 +62,7 @@ cargo clippy -- -D warnings
 src/
 ├─ app/                 # Route definitions and top-level app composition
 ├─ components/          # Common, dashboard, and layout components
-├─ pages/               # Dashboard and Settings pages
+├─ pages/               # Dashboard, Projects, Models, History, and Settings pages
 ├─ services/            # Tauri IPC service wrappers
 ├─ stores/              # Lightweight application state types
 ├─ styles/              # CSS variables and global styles
@@ -79,11 +79,15 @@ src-tauri/
    ├─ database/          # SQLite pool and migration coordination
    ├─ error/             # Unified backend and command errors
    ├─ models/            # Serializable backend response models
+   ├─ model_usage/       # Derived usage aggregation by observed model
    ├─ pricing/           # Versioned API-equivalent pricing catalog and engine
    ├─ prediction/        # Estimated quota depletion projections
+   ├─ project/           # Derived usage aggregation by official thread cwd
    ├─ rate_limit/        # Official rate-limit reads, events, and SQLite history
    ├─ state/              # Managed application state
    ├─ tray/               # System tray and close-to-tray behavior
+   ├─ history/            # Bounded monitoring history queries
+   ├─ thread_usage/       # Passive token notifications and metadata inventory
    └─ usage/              # Official account usage read and cache
 ```
 
@@ -95,9 +99,9 @@ On Windows the default database file is:
 %APPDATA%\com.codexusagemonitor.app\codex-usage-monitor.db
 ```
 
-The current migrations create `app_meta`, `settings`, `schema_info`, and official rate-limit snapshot/window history. The database records schema version `2`.
+The current migrations create `app_meta`, `settings`, `schema_info`, official rate-limit snapshot/window history, thread metadata, and token snapshots. The database records schema version `3`.
 
-## DEV-018 currently provides
+## DEV-022 currently provides
 
 - Tauri desktop shell
 - React frontend
@@ -163,11 +167,15 @@ The current migrations create `app_meta`, `settings`, `schema_info`, and officia
 - Production Dashboard with 5 Hour Usage, Weekly Usage, Today Tokens, and API Equivalent Cost cards
 - Usage Overview, all official Rate Limit Details, account details, and collapsed diagnostics
 - Local Reset Countdown driven by official Unix-second `resetsAt` values
+- Passive Thread Token Usage observation from `thread/tokenUsage/updated`
+- Bounded non-archived Thread metadata inventory through `thread/list`
+- Derived Project and Model aggregation from observed token deltas
+- Explicit pricing coverage with Unknown and unsupported models excluded from cost
+- History dashboard with native SVG rate-limit and observed-token charts
 
-The live API Equivalent Cost card remains unavailable until App Server usage data includes per-model
-uncached input, cached input, cache-write, and output token categories. The Pricing Engine is
-implemented and testable independently; it does not guess token splits or derive a live value from
-aggregate usage totals.
+The API Equivalent Cost card is derived only from observed delta events with explicit model
+attribution and supported pricing. Unknown or unsupported models remain visible in token totals but
+are excluded from cost and reflected in pricing coverage.
 
 Account, rate-limit, and usage access is deliberately read-only. The service does not start login,
 cancel login, log out, accept API keys, persist credentials, refresh tokens, read `auth.json` or cookies,
@@ -179,9 +187,9 @@ Burn Rate and quota prediction are estimates derived from official `usedPercent`
 `resetsAt` observations. They are always labeled `Estimated`; the monitor never presents them as
 official Codex predictions.
 
-## Not implemented yet
+## Remaining work
 
-Thread token usage, project/model aggregation, history dashboard, and full Settings are not implemented yet.
+Full Settings remains to be implemented.
 The transport can be connected while the Codex protocol handshake is not initialized or after a later transport disconnect.
 
 The following remain intentionally out of scope for DEV-014:
@@ -191,8 +199,8 @@ The following remain intentionally out of scope for DEV-014:
 - Startup integration
 - HTTP requests, cookie access, authentication file access, and token persistence
 
-The database schema is at version `2`; rate-limit snapshots are persisted, while Usage history remains in memory.
+Thread token usage coverage is limited to token-usage notifications observed by this monitor's App Server connection. The application does not resume threads solely to harvest token history, does not read conversation previews, and does not persist prompt or assistant message text. Rate-limit and token history queries are bounded to 2,000 points.
 
 ## Next stage
 
-`DEV-019 — Thread Token Usage`
+`DEV-023 — Settings`
