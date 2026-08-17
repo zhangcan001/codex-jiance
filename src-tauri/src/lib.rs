@@ -7,6 +7,7 @@ mod models;
 pub mod pricing;
 mod rate_limit;
 mod state;
+mod tray;
 mod usage;
 
 use error::AppError;
@@ -40,6 +41,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
             app.manage(AppState::from_database(database));
+            tray::setup(app)?;
             log::info!("Application ready");
             Ok(())
         })
@@ -56,6 +58,18 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::get_codex_rate_limits,
             commands::codex::get_codex_usage
         ])
+        .on_window_event(|window, event| {
+            if window.label() != tray::MAIN_WINDOW_LABEL {
+                return;
+            }
+
+            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
+                api.prevent_close();
+                if let Err(error) = window.hide() {
+                    log::error!("Failed to hide main window to tray: {error}");
+                }
+            }
+        })
         .build(tauri::generate_context!())?;
 
     app.run(|app_handle, event| {
