@@ -1,6 +1,6 @@
-use std::sync::Arc;
+use std::sync::{Arc, Weak};
 
-use tokio::sync::RwLock;
+use tokio::sync::{broadcast, Mutex, RwLock};
 
 use crate::{
     account::{unix_timestamp, AccountService, AccountStatus, CodexAccountInfo},
@@ -15,6 +15,7 @@ use super::{
 };
 
 pub(crate) const RATE_LIMIT_READ_METHOD: &str = "account/rateLimits/read";
+const RATE_LIMIT_UPDATED_METHOD: &str = "account/rateLimits/updated";
 const RATE_LIMIT_RESPONSE_PARSE_ERROR: &str = "Rate limit response could not be parsed.";
 const RATE_LIMIT_CACHE_TTL_SECONDS: i64 = 60;
 
@@ -25,11 +26,17 @@ struct RateLimitCache {
     fetched_at: Option<i64>,
 }
 
+struct RateLimitWatcher {
+    client: Weak<JsonRpcClient>,
+    task: tokio::task::JoinHandle<()>,
+}
+
 pub(crate) struct RateLimitService {
     app_server_manager: Arc<AppServerManager>,
     compatibility_service: Arc<SchemaCompatibilityService>,
     account_service: Arc<AccountService>,
     cache: Arc<RwLock<RateLimitCache>>,
+    watcher: Mutex<Option<RateLimitWatcher>>,
 }
 
 impl RateLimitService {
@@ -47,6 +54,7 @@ impl RateLimitService {
                 stale: true,
                 fetched_at: None,
             })),
+            watcher: Mutex::new(None),
         }
     }
 
@@ -80,6 +88,8 @@ impl RateLimitService {
             }
         };
 
+        self.ensure_watcher(&client).await;
+
         if !force {
             let now = unix_timestamp();
             let cache = self.cache.read().await;
@@ -104,10 +114,47 @@ impl RateLimitService {
     }
 
     pub(crate) async fn shutdown(&self) {
+        let watcher = self.watcher.lock().await.take();
+        if let Some(watcher) = watcher {
+            watcher.task.abort();
+            let _ = watcher.task.await;
+        }
+
         let mut cache = self.cache.write().await;
         cache.current = None;
         cache.stale = true;
         cache.fetched_at = None;
+    }
+
+    async fn ensure_watcher(&self, client: &Arc<JsonRpcClient>) {
+        let mut watcher = self.watcher.lock().await;
+        if watcher
+            .as_ref()
+            .is_some_and(|watcher| watcher_is_current(watcher, client))
+        {
+            return;
+        }
+
+        if let Some(previous) = watcher.take() {
+            previous.task.abort();
+            let _ = previous.task.await;
+            self.clear_cache().await;
+        } else {
+            self.mark_stale().await;
+        }
+
+        let receiver = client.subscribe_notifications();
+        let client_weak = Arc::downgrade(client);
+        let task = tokio::spawn(watch_notifications(
+            Arc::clone(&self.cache),
+            Weak::clone(&client_weak),
+            receiver,
+        ));
+        *watcher = Some(RateLimitWatcher {
+            client: client_weak,
+            task,
+        });
+        log::info!("Rate limit notification watcher attached");
     }
 
     pub(crate) async fn read_rate_limits_with_client(
@@ -130,6 +177,80 @@ impl RateLimitService {
     async fn mark_stale(&self) {
         self.cache.write().await.stale = true;
     }
+
+    async fn clear_cache(&self) {
+        let mut cache = self.cache.write().await;
+        cache.current = None;
+        cache.stale = true;
+        cache.fetched_at = None;
+    }
+}
+
+async fn watch_notifications(
+    cache: Arc<RwLock<RateLimitCache>>,
+    client: Weak<JsonRpcClient>,
+    mut receiver: broadcast::Receiver<crate::codex::app_server::json_rpc::RpcNotification>,
+) {
+    loop {
+        match receiver.recv().await {
+            Ok(notification) if notification.method == RATE_LIMIT_UPDATED_METHOD => {
+                log::info!("account/rateLimits/updated received");
+                mark_cache_stale(&cache).await;
+                if !refresh_from_notification(&cache, &client).await {
+                    log::warn!("Rate limit cache refresh after notification failed");
+                }
+            }
+            Ok(_) => {}
+            Err(broadcast::error::RecvError::Lagged(_)) => {
+                mark_cache_stale(&cache).await;
+                if !refresh_from_notification(&cache, &client).await {
+                    log::warn!("Rate limit cache refresh after notification lag failed");
+                }
+            }
+            Err(broadcast::error::RecvError::Closed) => {
+                log::info!("Rate limit notification watcher closed");
+                return;
+            }
+        }
+    }
+}
+
+async fn refresh_from_notification(
+    cache: &Arc<RwLock<RateLimitCache>>,
+    client: &Weak<JsonRpcClient>,
+) -> bool {
+    let Some(client) = client.upgrade() else {
+        return false;
+    };
+
+    match RateLimitService::read_rate_limits_with_client(&client).await {
+        Ok(rate_limits) => {
+            let mut cache = cache.write().await;
+            cache.current = Some(rate_limits);
+            cache.stale = false;
+            cache.fetched_at = Some(unix_timestamp());
+            log::info!("Rate limit cache refreshed");
+            true
+        }
+        Err(_) => {
+            mark_cache_stale(cache).await;
+            false
+        }
+    }
+}
+
+async fn mark_cache_stale(cache: &RwLock<RateLimitCache>) {
+    cache.write().await.stale = true;
+}
+
+fn watcher_is_current(watcher: &RateLimitWatcher, client: &Arc<JsonRpcClient>) -> bool {
+    !watcher.task.is_finished() && same_client(&watcher.client, client)
+}
+
+fn same_client(existing: &Weak<JsonRpcClient>, current: &Arc<JsonRpcClient>) -> bool {
+    existing
+        .upgrade()
+        .is_some_and(|existing| Arc::ptr_eq(&existing, current))
 }
 
 fn account_gate(account: &CodexAccountInfo) -> Option<RateLimitInfo> {
@@ -267,10 +388,14 @@ fn error_info(message: &str) -> RateLimitInfo {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::Arc;
+    use std::sync::{Arc, Weak};
 
     use serde_json::{json, Value};
-    use tokio::io::{split, AsyncBufReadExt, AsyncWriteExt, BufReader};
+    use tokio::{
+        io::{split, AsyncBufReadExt, AsyncWriteExt, BufReader},
+        sync::broadcast,
+        time::{timeout, Duration},
+    };
 
     use super::{account_gate, normalize_rate_limits, RateLimitService, RATE_LIMIT_READ_METHOD};
     use crate::rate_limit::model::{RateLimitStatus, RateLimitWindowKind};
@@ -446,6 +571,174 @@ mod tests {
         client.shutdown().await;
     }
 
+    #[tokio::test]
+    async fn rate_limit_updated_triggers_one_full_read_and_ignores_partial_payload() {
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        let (client_reader, client_writer) = split(client_io);
+        let (server_reader, mut server_writer) = split(server_io);
+        let client = JsonRpcClient::from_io(client_reader, client_writer).await;
+        let cache = Arc::new(tokio::sync::RwLock::new(super::RateLimitCache {
+            current: None,
+            stale: true,
+            fetched_at: None,
+        }));
+        let receiver = client.subscribe_notifications();
+        let watcher = tokio::spawn(super::watch_notifications(
+            Arc::clone(&cache),
+            Arc::downgrade(&client),
+            receiver,
+        ));
+
+        server_writer
+            .write_all(b"{\"method\":\"account/updated\",\"params\":{\"ignored\":true}}\n")
+            .await
+            .expect("unrelated notification should send");
+        server_writer
+            .write_all(
+                b"{\"method\":\"account/rateLimits/updated\",\"params\":{\"rateLimits\":{\"primary\":{\"usedPercent\":99}}}}\n",
+            )
+            .await
+            .expect("rate limit notification should send");
+
+        let mut reader = BufReader::new(server_reader);
+        let mut line = String::new();
+        timeout(Duration::from_secs(1), reader.read_line(&mut line))
+            .await
+            .expect("full refresh request should arrive")
+            .expect("request should be readable");
+        let request: Value = serde_json::from_str(&line).expect("request should be JSON");
+        assert_eq!(request["method"], RATE_LIMIT_READ_METHOD);
+        assert!(request.get("params").is_none());
+        let response = json!({
+            "id": request["id"],
+            "result": {
+                "rateLimits": {
+                    "limitId": "chatgpt",
+                    "primary": {"usedPercent": 37, "windowDurationMins": 300}
+                }
+            }
+        });
+        let mut response_bytes = serde_json::to_vec(&response).expect("response should serialize");
+        response_bytes.push(b'\n');
+        server_writer
+            .write_all(&response_bytes)
+            .await
+            .expect("response should send");
+
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if !cache.read().await.stale {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        })
+        .await
+        .expect("cache should refresh");
+        let cached = cache.read().await.current.clone().expect("cached snapshot");
+        assert_eq!(cached.windows[0].used_percent, 37.0);
+
+        watcher.abort();
+        let _ = watcher.await;
+        client.shutdown().await;
+    }
+
+    #[tokio::test]
+    async fn lagged_notification_runs_one_refresh_and_closed_watcher_exits() {
+        let (client_io, server_io) = tokio::io::duplex(4096);
+        let (client_reader, client_writer) = split(client_io);
+        let (server_reader, mut server_writer) = split(server_io);
+        let client = JsonRpcClient::from_io(client_reader, client_writer).await;
+        let cache = Arc::new(tokio::sync::RwLock::new(super::RateLimitCache {
+            current: None,
+            stale: true,
+            fetched_at: None,
+        }));
+        let (sender, receiver) = broadcast::channel(1);
+        sender
+            .send(crate::codex::app_server::json_rpc::RpcNotification {
+                method: "ignored/one".to_owned(),
+                params: Value::Null,
+            })
+            .expect("first notification should send");
+        sender
+            .send(crate::codex::app_server::json_rpc::RpcNotification {
+                method: "ignored/two".to_owned(),
+                params: Value::Null,
+            })
+            .expect("second notification should send");
+        let watcher = tokio::spawn(super::watch_notifications(
+            Arc::clone(&cache),
+            Arc::downgrade(&client),
+            receiver,
+        ));
+
+        let mut reader = BufReader::new(server_reader);
+        let mut line = String::new();
+        timeout(Duration::from_secs(1), reader.read_line(&mut line))
+            .await
+            .expect("lagged refresh request should arrive")
+            .expect("request should be readable");
+        let request: Value = serde_json::from_str(&line).expect("request should be JSON");
+        assert_eq!(request["method"], RATE_LIMIT_READ_METHOD);
+        assert!(request.get("params").is_none());
+        let response = json!({
+            "id": request["id"],
+            "result": {"rateLimits": {"primary": {"usedPercent": 1}}}
+        });
+        let mut response_bytes = serde_json::to_vec(&response).expect("response should serialize");
+        response_bytes.push(b'\n');
+        server_writer
+            .write_all(&response_bytes)
+            .await
+            .expect("response should send");
+        timeout(Duration::from_secs(1), async {
+            loop {
+                if !cache.read().await.current.is_some() {
+                    tokio::time::sleep(Duration::from_millis(5)).await;
+                    continue;
+                }
+                break;
+            }
+        })
+        .await
+        .expect("lagged cache should refresh");
+
+        drop(sender);
+        watcher.abort();
+        let _ = watcher.await;
+        client.shutdown().await;
+
+        let (closed_sender, closed_receiver) = broadcast::channel(1);
+        drop(closed_sender);
+        let closed_watcher = tokio::spawn(super::watch_notifications(
+            Arc::clone(&cache),
+            Weak::new(),
+            closed_receiver,
+        ));
+        timeout(Duration::from_secs(1), closed_watcher)
+            .await
+            .expect("closed watcher should exit")
+            .expect("closed watcher should join");
+    }
+
+    #[tokio::test]
+    async fn same_client_identity_is_reused_but_new_client_is_not() {
+        let (first_io, _) = tokio::io::duplex(64);
+        let (first_reader, first_writer) = split(first_io);
+        let first = JsonRpcClient::from_io(first_reader, first_writer).await;
+        let first_weak = Arc::downgrade(&first);
+        assert!(super::same_client(&first_weak, &first));
+
+        let (second_io, _) = tokio::io::duplex(64);
+        let (second_reader, second_writer) = split(second_io);
+        let second = JsonRpcClient::from_io(second_reader, second_writer).await;
+        assert!(!super::same_client(&first_weak, &second));
+
+        first.shutdown().await;
+        second.shutdown().await;
+    }
+
     #[test]
     fn unknown_fields_and_decimal_used_percent_are_tolerated() {
         let response: RateLimitReadResponse = serde_json::from_value(json!({
@@ -460,7 +753,4 @@ mod tests {
         assert_eq!(info.windows[0].used_percent, 41.25);
         assert_eq!(info.reset_credits_available, Some(4));
     }
-
-    #[allow(dead_code)]
-    fn _keep_arc_import_used(_: Arc<JsonRpcClient>) {}
 }

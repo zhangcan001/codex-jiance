@@ -613,7 +613,7 @@ export default function DashboardPage() {
 
     const intervalId = window.setInterval(() => {
       void loadRateLimits();
-    }, 60_000);
+    }, 10_000);
 
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadRateLimits]);
