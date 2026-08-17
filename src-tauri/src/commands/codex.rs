@@ -1,4 +1,5 @@
 use crate::{
+    account::CodexAccountInfo,
     codex,
     error::CommandResult,
     models::codex::{AppServerStatusInfo, CodexInstallationInfo, SchemaCompatibilityReport},
@@ -38,4 +39,12 @@ pub async fn check_codex_schema_compatibility(
     force: bool,
 ) -> CommandResult<SchemaCompatibilityReport> {
     Ok(state.schema_compatibility_service.check(force).await)
+}
+
+#[tauri::command]
+pub async fn get_codex_account(
+    state: State<'_, AppState>,
+    force: bool,
+) -> CommandResult<CodexAccountInfo> {
+    Ok(state.account_service.get_account(force).await)
 }

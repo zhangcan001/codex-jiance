@@ -4,6 +4,7 @@ use std::sync::Arc;
 use sqlx::SqlitePool;
 
 use crate::{
+    account::AccountService,
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
 };
@@ -13,15 +14,24 @@ pub struct AppState {
     pub database_path: PathBuf,
     pub app_server_manager: Arc<AppServerManager>,
     pub schema_compatibility_service: Arc<SchemaCompatibilityService>,
+    pub account_service: Arc<AccountService>,
 }
 
 impl AppState {
     pub fn from_database(database: Database) -> Self {
+        let app_server_manager = Arc::new(AppServerManager::new());
+        let schema_compatibility_service = Arc::new(SchemaCompatibilityService::new());
+        let account_service = Arc::new(AccountService::new(
+            Arc::clone(&app_server_manager),
+            Arc::clone(&schema_compatibility_service),
+        ));
+
         Self {
             db_pool: database.pool,
             database_path: database.path,
-            app_server_manager: Arc::new(AppServerManager::new()),
-            schema_compatibility_service: Arc::new(SchemaCompatibilityService::new()),
+            app_server_manager,
+            schema_compatibility_service,
+            account_service,
         }
     }
 }

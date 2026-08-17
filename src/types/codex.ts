@@ -71,3 +71,17 @@ export interface SchemaCompatibilityReport {
   warnings: string[];
   message: string | null;
 }
+
+export type AccountStatus = "connected" | "noAccount" | "unavailable" | "error";
+
+export interface CodexAccountInfo {
+  status: AccountStatus;
+  accountType: string | null;
+  emailMasked: string | null;
+  planType: string | null;
+  credentialSource: string | null;
+  requiresOpenaiAuth: boolean | null;
+  authMode: string | null;
+  updatedAt: number;
+  message: string | null;
+}

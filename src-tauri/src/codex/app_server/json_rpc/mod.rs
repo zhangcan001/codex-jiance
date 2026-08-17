@@ -2,3 +2,4 @@ mod client;
 pub mod protocol;
 
 pub use client::JsonRpcClient;
+pub use protocol::RpcNotification;

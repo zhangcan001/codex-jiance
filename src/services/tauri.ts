@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AppServerStatusInfo,
+  CodexAccountInfo,
   CodexInstallationInfo,
   SchemaCompatibilityReport,
 } from "../types/codex";
@@ -78,4 +79,8 @@ export function checkCodexSchemaCompatibility(
   force = false,
 ): Promise<SchemaCompatibilityReport> {
   return invokeCommand<SchemaCompatibilityReport>("check_codex_schema_compatibility", { force });
+}
+
+export function getCodexAccount(force = false): Promise<CodexAccountInfo> {
+  return invokeCommand<CodexAccountInfo>("get_codex_account", { force });
 }

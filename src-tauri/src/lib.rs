@@ -1,3 +1,4 @@
+mod account;
 mod codex;
 mod commands;
 mod database;
@@ -47,14 +48,16 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::start_codex_app_server,
             commands::codex::stop_codex_app_server,
             commands::codex::get_codex_app_server_status,
-            commands::codex::check_codex_schema_compatibility
+            commands::codex::check_codex_schema_compatibility,
+            commands::codex::get_codex_account
         ])
         .build(tauri::generate_context!())?;
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
-            log::info!("Application exit received; cleaning up App Server");
+            log::info!("Application exit received; cleaning up Account watcher and App Server");
             let state = app_handle.state::<AppState>();
+            tauri::async_runtime::block_on(state.account_service.shutdown());
             if let Err(error) = tauri::async_runtime::block_on(state.app_server_manager.shutdown())
             {
                 log::error!("App Server cleanup on application exit failed: {error}");

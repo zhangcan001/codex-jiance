@@ -183,6 +183,32 @@ impl AppServerManager {
         Ok(snapshot(&inner))
     }
 
+    pub(crate) async fn initialized_client(&self) -> Result<Arc<JsonRpcClient>, AppError> {
+        let mut inner = self.inner.lock().await;
+        refresh_locked(&mut inner).await?;
+
+        if inner.status != AppServerStatus::Running
+            || inner.handshake_status != ProtocolHandshakeStatus::Initialized
+        {
+            return Err(AppError::AppServerUnavailable(
+                "Codex App Server is not running with an initialized protocol.".to_owned(),
+            ));
+        }
+
+        let Some(client) = inner.client.as_ref() else {
+            return Err(AppError::AppServerUnavailable(
+                "Codex App Server JSON-RPC client is unavailable.".to_owned(),
+            ));
+        };
+        if !client.is_connected() {
+            return Err(AppError::RpcDisconnected(
+                "App Server JSON-RPC transport is disconnected.".to_owned(),
+            ));
+        }
+
+        Ok(Arc::clone(client))
+    }
+
     pub async fn shutdown(&self) -> Result<(), AppError> {
         log::info!("App Server cleanup on application exit");
         self.stop().await.map(|_| ())
@@ -333,7 +359,10 @@ mod tests {
     use tokio::time::timeout;
 
     use super::AppServerManager;
-    use crate::models::codex::{AppServerStatus, ProtocolHandshakeStatus};
+    use crate::{
+        error::AppError,
+        models::codex::{AppServerStatus, ProtocolHandshakeStatus},
+    };
 
     #[tokio::test]
     async fn manager_starts_stopped() {
@@ -405,5 +434,14 @@ mod tests {
         assert_eq!(status.status, AppServerStatus::Stopped);
 
         drop(lifecycle_guard);
+    }
+
+    #[tokio::test]
+    async fn initialized_client_rejects_the_initial_stopped_state() {
+        let manager = AppServerManager::new();
+
+        let result = manager.initialized_client().await;
+
+        assert!(matches!(result, Err(AppError::AppServerUnavailable(_))));
     }
 }

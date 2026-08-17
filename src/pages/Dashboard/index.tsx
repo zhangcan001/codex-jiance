@@ -9,6 +9,7 @@ import {
   detectCodexEnvironment,
   checkCodexSchemaCompatibility,
   getAppInfo,
+  getCodexAccount,
   getCodexAppServerStatus,
   getDatabaseStatus,
   healthCheck,
@@ -16,8 +17,10 @@ import {
   stopCodexAppServer,
 } from "../../services/tauri";
 import type {
+  AccountStatus,
   AppServerStatus,
   AppServerStatusInfo,
+  CodexAccountInfo,
   CodexInstallationInfo,
   ProtocolHandshakeStatus,
   SchemaCompatibilityReport,
@@ -170,6 +173,74 @@ function formatStartedAt(timestamp: number | null): string {
   return timestamp === null ? "--" : new Date(timestamp * 1000).toLocaleString();
 }
 
+function getAccountStatusLabel(
+  status: AccountStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  if (error && !status) {
+    return "Error";
+  }
+
+  switch (status) {
+    case "connected":
+      return "Connected";
+    case "noAccount":
+      return "No account";
+    case "unavailable":
+      return "Unavailable";
+    case "error":
+      return "Error";
+    default:
+      return "Unavailable";
+  }
+}
+
+function getAccountStatusVariant(
+  status: AccountStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): StatusVariant {
+  if (isLoading) {
+    return "warning";
+  }
+  if (error && !status) {
+    return "error";
+  }
+
+  switch (status) {
+    case "connected":
+      return "success";
+    case "noAccount":
+      return "warning";
+    case "error":
+      return "error";
+    case "unavailable":
+    default:
+      return "neutral";
+  }
+}
+
+function formatPlanType(planType: string | null): string {
+  if (!planType) {
+    return "--";
+  }
+
+  switch (planType.toLowerCase()) {
+    case "plus":
+      return "Plus";
+    case "pro":
+      return "Pro";
+    case "business":
+      return "Business";
+    default:
+      return planType;
+  }
+}
+
 function getCompatibilityStatusLabel(
   status: SchemaCompatibilityStatus | null,
   isLoading: boolean,
@@ -259,9 +330,13 @@ export default function DashboardPage() {
   const [compatibilityInfo, setCompatibilityInfo] = useState<SchemaCompatibilityReport | null>(null);
   const [compatibilityError, setCompatibilityError] = useState<string | null>(null);
   const [isCompatibilityLoading, setIsCompatibilityLoading] = useState(false);
+  const [accountInfo, setAccountInfo] = useState<CodexAccountInfo | null>(null);
+  const [accountError, setAccountError] = useState<string | null>(null);
+  const [isAccountLoading, setIsAccountLoading] = useState(false);
   const hasLoadedCodexRef = useRef(false);
   const hasLoadedAppServerRef = useRef(false);
   const hasLoadedCompatibilityRef = useRef(false);
+  const hasLoadedAccountRef = useRef(false);
 
   const loadSystemStatus = useCallback(async () => {
     setIsLoading(true);
@@ -327,6 +402,20 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadAccount = useCallback(async (force = false) => {
+    setIsAccountLoading(true);
+    setAccountError(null);
+
+    try {
+      setAccountInfo(await getCodexAccount(force));
+    } catch (loadError: unknown) {
+      setAccountInfo(null);
+      setAccountError(getErrorMessage(loadError));
+    } finally {
+      setIsAccountLoading(false);
+    }
+  }, []);
+
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
     setAppServerError(null);
@@ -378,6 +467,31 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(intervalId);
   }, [appServerInfo?.status, loadAppServerStatus]);
+
+  const accountReady =
+    appServerInfo?.status === "running" &&
+    appServerInfo.handshakeStatus === "initialized" &&
+    appServerInfo.jsonRpcConnected;
+
+  useEffect(() => {
+    if (!accountReady) {
+      hasLoadedAccountRef.current = false;
+      setAccountInfo(null);
+      setAccountError(null);
+      return;
+    }
+
+    if (!hasLoadedAccountRef.current) {
+      hasLoadedAccountRef.current = true;
+      void loadAccount();
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadAccount();
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [accountReady, loadAccount]);
 
   useEffect(() => {
     if (
@@ -493,7 +607,24 @@ export default function DashboardPage() {
         ? "CLI ready"
         : codexInfo?.status === "notFound"
           ? "Not found"
-          : "Unavailable";
+        : "Unavailable";
+  const visibleAccountInfo = accountReady ? accountInfo : null;
+  const accountStatus = accountReady
+    ? visibleAccountInfo?.status ?? (accountError ? "error" : null)
+    : "unavailable";
+  const accountStatusLabel = getAccountStatusLabel(
+    accountStatus,
+    isAccountLoading,
+    accountError,
+  );
+  const accountStatusVariant = getAccountStatusVariant(
+    accountStatus,
+    isAccountLoading,
+    accountError,
+  );
+  const accountMessage = accountReady
+    ? accountError ?? visibleAccountInfo?.message
+    : "Start the Codex App Server to read account information.";
 
   return (
     <div className="page page--dashboard">
@@ -767,6 +898,67 @@ export default function DashboardPage() {
         {appServerMessage ? <p className="codex-message">{appServerMessage}</p> : null}
       </section>
 
+      <section className="section-block" aria-labelledby="codex-account-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Read-only Codex account</p>
+            <h2 id="codex-account-heading">Codex Account</h2>
+          </div>
+          <div className="section-heading__actions">
+            <StatusBadge variant={accountStatusVariant}>{accountStatusLabel}</StatusBadge>
+            <button
+              className="button button--secondary button--compact"
+              type="button"
+              onClick={() => void loadAccount(true)}
+              disabled={!accountReady || isAccountLoading}
+            >
+              {isAccountLoading ? "Refreshing…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+        <div className="codex-environment codex-account">
+          <div className="codex-row">
+            <span>Status</span>
+            <StatusBadge variant={accountStatusVariant}>{accountStatusLabel}</StatusBadge>
+          </div>
+          <div className="codex-row">
+            <span>Account Type</span>
+            <strong>{visibleAccountInfo?.accountType ?? "--"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Plan</span>
+            <strong>{formatPlanType(visibleAccountInfo?.planType ?? null)}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Email</span>
+            <strong>{visibleAccountInfo?.emailMasked ?? "--"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Auth Mode</span>
+            <strong>{visibleAccountInfo?.authMode ?? "--"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>OpenAI Auth Required</span>
+            <strong>
+              {visibleAccountInfo?.requiresOpenaiAuth === null || !visibleAccountInfo
+                ? "--"
+                : visibleAccountInfo.requiresOpenaiAuth
+                  ? "Yes"
+                  : "No"}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Credential Source</span>
+            <strong>{visibleAccountInfo?.credentialSource ?? "--"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Last Updated</span>
+            <strong>{formatStartedAt(visibleAccountInfo?.updatedAt ?? null)}</strong>
+          </div>
+        </div>
+        {accountMessage ? <p className="codex-message">{accountMessage}</p> : null}
+      </section>
+
       <section className="section-block" aria-labelledby="system-status-heading">
         <div className="section-heading">
           <div>
@@ -806,8 +998,9 @@ export default function DashboardPage() {
         <div>
           <h2>Local-first foundation</h2>
           <p>
-            DEV-006 validates the installed Codex CLI against its stable locally generated App
-            Server schema. Account and usage monitoring are not connected yet.
+            DEV-007 reads the current account through the initialized Codex App Server. Email
+            values are masked and authentication files, cookies, and tokens stay outside the
+            monitor.
           </p>
         </div>
       </section>

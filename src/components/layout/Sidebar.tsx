@@ -46,7 +46,7 @@ export function Sidebar({ activeRoute, onNavigate }: SidebarProps) {
 
       <div className="sidebar__footer">
         <StatusBadge variant="success">Local only</StatusBadge>
-        <p>Account monitoring will be added in a later phase.</p>
+        <p>Read-only account data via the Codex App Server.</p>
       </div>
     </aside>
   );
