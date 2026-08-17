@@ -11,6 +11,7 @@ use crate::{
 
 use super::{
     model::{RateLimitInfo, RateLimitStatus, RateLimitWindow, RateLimitWindowKind},
+    repository::RateLimitRepository,
     wire::{RateLimitBucketWire, RateLimitReadResponse, RateLimitWindowWire},
 };
 
@@ -35,6 +36,7 @@ pub(crate) struct RateLimitService {
     app_server_manager: Arc<AppServerManager>,
     compatibility_service: Arc<SchemaCompatibilityService>,
     account_service: Arc<AccountService>,
+    repository: Arc<RateLimitRepository>,
     cache: Arc<RwLock<RateLimitCache>>,
     watcher: Mutex<Option<RateLimitWatcher>>,
 }
@@ -44,11 +46,13 @@ impl RateLimitService {
         app_server_manager: Arc<AppServerManager>,
         compatibility_service: Arc<SchemaCompatibilityService>,
         account_service: Arc<AccountService>,
+        repository: Arc<RateLimitRepository>,
     ) -> Self {
         Self {
             app_server_manager,
             compatibility_service,
             account_service,
+            repository,
             cache: Arc::new(RwLock::new(RateLimitCache {
                 current: None,
                 stale: true,
@@ -103,6 +107,7 @@ impl RateLimitService {
         match Self::read_rate_limits_with_client(&client).await {
             Ok(rate_limits) => {
                 self.set_cache(rate_limits.clone()).await;
+                self.persist_snapshot(&rate_limits).await;
                 log::info!("Rate limit cache refreshed");
                 rate_limits
             }
@@ -148,6 +153,7 @@ impl RateLimitService {
         let task = tokio::spawn(watch_notifications(
             Arc::clone(&self.cache),
             Weak::clone(&client_weak),
+            Some(Arc::clone(&self.repository)),
             receiver,
         ));
         *watcher = Some(RateLimitWatcher {
@@ -174,6 +180,16 @@ impl RateLimitService {
         cache.fetched_at = Some(unix_timestamp());
     }
 
+    async fn persist_snapshot(&self, rate_limits: &RateLimitInfo) {
+        if let Err(error) = self
+            .repository
+            .persist_snapshot_if_changed(rate_limits)
+            .await
+        {
+            log::warn!("Rate limit snapshot persistence failed: {error}");
+        }
+    }
+
     async fn mark_stale(&self) {
         self.cache.write().await.stale = true;
     }
@@ -189,6 +205,7 @@ impl RateLimitService {
 async fn watch_notifications(
     cache: Arc<RwLock<RateLimitCache>>,
     client: Weak<JsonRpcClient>,
+    repository: Option<Arc<RateLimitRepository>>,
     mut receiver: broadcast::Receiver<crate::codex::app_server::json_rpc::RpcNotification>,
 ) {
     loop {
@@ -196,14 +213,14 @@ async fn watch_notifications(
             Ok(notification) if notification.method == RATE_LIMIT_UPDATED_METHOD => {
                 log::info!("account/rateLimits/updated received");
                 mark_cache_stale(&cache).await;
-                if !refresh_from_notification(&cache, &client).await {
+                if !refresh_from_notification(&cache, &client, repository.as_deref()).await {
                     log::warn!("Rate limit cache refresh after notification failed");
                 }
             }
             Ok(_) => {}
             Err(broadcast::error::RecvError::Lagged(_)) => {
                 mark_cache_stale(&cache).await;
-                if !refresh_from_notification(&cache, &client).await {
+                if !refresh_from_notification(&cache, &client, repository.as_deref()).await {
                     log::warn!("Rate limit cache refresh after notification lag failed");
                 }
             }
@@ -218,6 +235,7 @@ async fn watch_notifications(
 async fn refresh_from_notification(
     cache: &Arc<RwLock<RateLimitCache>>,
     client: &Weak<JsonRpcClient>,
+    repository: Option<&RateLimitRepository>,
 ) -> bool {
     let Some(client) = client.upgrade() else {
         return false;
@@ -225,10 +243,17 @@ async fn refresh_from_notification(
 
     match RateLimitService::read_rate_limits_with_client(&client).await {
         Ok(rate_limits) => {
-            let mut cache = cache.write().await;
-            cache.current = Some(rate_limits);
-            cache.stale = false;
-            cache.fetched_at = Some(unix_timestamp());
+            {
+                let mut cache = cache.write().await;
+                cache.current = Some(rate_limits.clone());
+                cache.stale = false;
+                cache.fetched_at = Some(unix_timestamp());
+            }
+            if let Some(repository) = repository {
+                if let Err(error) = repository.persist_snapshot_if_changed(&rate_limits).await {
+                    log::warn!("Rate limit snapshot persistence failed: {error}");
+                }
+            }
             log::info!("Rate limit cache refreshed");
             true
         }
@@ -586,6 +611,7 @@ mod tests {
         let watcher = tokio::spawn(super::watch_notifications(
             Arc::clone(&cache),
             Arc::downgrade(&client),
+            None,
             receiver,
         ));
 
@@ -670,6 +696,7 @@ mod tests {
         let watcher = tokio::spawn(super::watch_notifications(
             Arc::clone(&cache),
             Arc::downgrade(&client),
+            None,
             receiver,
         ));
 
@@ -714,6 +741,7 @@ mod tests {
         let closed_watcher = tokio::spawn(super::watch_notifications(
             Arc::clone(&cache),
             Weak::new(),
+            None,
             closed_receiver,
         ));
         timeout(Duration::from_secs(1), closed_watcher)

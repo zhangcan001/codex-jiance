@@ -37,13 +37,13 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn schema_version_is_one_after_migration() {
+    async fn schema_version_is_two_after_migration() {
         let pool = create_pool("sqlite::memory:")
             .await
             .expect("memory database should connect");
         run(&pool).await.expect("migration should complete");
 
-        assert_eq!(get_schema_version(&pool).await.expect("schema exists"), 1);
+        assert_eq!(get_schema_version(&pool).await.expect("schema exists"), 2);
     }
 
     #[tokio::test]
@@ -86,7 +86,7 @@ mod tests {
             get_schema_version(&second_pool)
                 .await
                 .expect("schema exists"),
-            1
+            2
         );
     }
 }

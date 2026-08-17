@@ -7,7 +7,7 @@ use crate::{
     account::AccountService,
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
-    rate_limit::RateLimitService,
+    rate_limit::{RateLimitRepository, RateLimitService},
 };
 
 pub struct AppState {
@@ -27,10 +27,12 @@ impl AppState {
             Arc::clone(&app_server_manager),
             Arc::clone(&schema_compatibility_service),
         ));
+        let rate_limit_repository = Arc::new(RateLimitRepository::new(database.pool.clone()));
         let rate_limit_service = Arc::new(RateLimitService::new(
             Arc::clone(&app_server_manager),
             Arc::clone(&schema_compatibility_service),
             Arc::clone(&account_service),
+            rate_limit_repository,
         ));
 
         Self {
