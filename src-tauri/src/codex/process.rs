@@ -17,7 +17,10 @@ pub struct ProcessOutput {
 pub async fn run_command(executable: &Path, args: &[&str]) -> Result<ProcessOutput, AppError> {
     let mut command = if is_windows_script(executable) {
         let mut command = Command::new("cmd.exe");
-        let command_line = build_cmd_line(executable, args);
+        let command_line = format!("\"{}\"", build_cmd_line(executable, args));
+        #[cfg(windows)]
+        command.raw_arg(format!("/D /S /C {command_line}"));
+        #[cfg(not(windows))]
         command.args(["/D", "/S", "/C", &command_line]);
         command
     } else {

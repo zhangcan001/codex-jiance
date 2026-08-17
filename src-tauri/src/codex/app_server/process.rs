@@ -36,7 +36,13 @@ pub(crate) struct AppServerProcess {
 pub(crate) async fn spawn_app_server(executable: &Path) -> Result<AppServerProcess, AppError> {
     let mut command = if is_windows_script(executable) {
         let mut command = Command::new("cmd.exe");
-        let command_line = build_cmd_line(executable, &["app-server", "--listen", "stdio://"]);
+        let command_line = format!(
+            "\"{}\"",
+            build_cmd_line(executable, &["app-server", "--listen", "stdio://"])
+        );
+        #[cfg(windows)]
+        command.raw_arg(format!("/D /S /C {command_line}"));
+        #[cfg(not(windows))]
         command.args(["/D", "/S", "/C", &command_line]);
         command
     } else {
