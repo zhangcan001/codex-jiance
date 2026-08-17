@@ -9,3 +9,19 @@ export interface CodexInstallationInfo {
   detectedAt: number;
   message: string | null;
 }
+
+export type AppServerStatus =
+  | "stopped"
+  | "starting"
+  | "running"
+  | "stopping"
+  | "failed";
+
+export interface AppServerStatusInfo {
+  status: AppServerStatus;
+  pid: number | null;
+  startedAt: number | null;
+  executablePath: string | null;
+  transport: string;
+  lastError: string | null;
+}

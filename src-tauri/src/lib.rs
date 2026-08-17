@@ -12,7 +12,7 @@ use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() -> Result<(), tauri::Error> {
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(
             tauri_plugin_log::Builder::default()
                 .targets([
@@ -43,7 +43,23 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::system::get_app_info,
             commands::system::health_check,
             commands::database::database_status,
-            commands::codex::detect_codex_environment
+            commands::codex::detect_codex_environment,
+            commands::codex::start_codex_app_server,
+            commands::codex::stop_codex_app_server,
+            commands::codex::get_codex_app_server_status
         ])
-        .run(tauri::generate_context!())
+        .build(tauri::generate_context!())?;
+
+    app.run(|app_handle, event| {
+        if let tauri::RunEvent::Exit = event {
+            log::info!("Application exit received; cleaning up App Server");
+            let state = app_handle.state::<AppState>();
+            if let Err(error) = tauri::async_runtime::block_on(state.app_server_manager.shutdown())
+            {
+                log::error!("App Server cleanup on application exit failed: {error}");
+            }
+        }
+    });
+
+    Ok(())
 }

@@ -399,6 +399,15 @@ h3 {
   border-color: var(--accent);
 }
 
+.button:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.button--secondary:disabled:hover {
+  border-color: var(--border);
+}
+
 .button--compact {
   padding: 7px 10px;
 }

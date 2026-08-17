@@ -57,7 +57,7 @@ pub(crate) fn is_windows_script(path: &Path) -> bool {
         .is_some_and(|extension| matches!(extension.to_ascii_lowercase().as_str(), "cmd" | "bat"))
 }
 
-fn build_cmd_line(executable: &Path, args: &[&str]) -> String {
+pub(crate) fn build_cmd_line(executable: &Path, args: &[&str]) -> String {
     let mut command_line = vec![quote_cmd_arg(&executable.to_string_lossy())];
     command_line.extend(args.iter().map(|arg| quote_cmd_arg(arg)));
     command_line.join(" ")

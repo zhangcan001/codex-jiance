@@ -30,6 +30,18 @@ pub enum AppError {
     #[error("Codex detection error: {0}")]
     CodexDetection(String),
 
+    #[error("Codex CLI was not found: {0}")]
+    CodexNotFound(String),
+
+    #[error("App Server is unavailable: {0}")]
+    AppServerUnavailable(String),
+
+    #[error("App Server start failed: {0}")]
+    AppServerStart(String),
+
+    #[error("App Server stop failed: {0}")]
+    AppServerStop(String),
+
     #[error("Unknown application error: {0}")]
     Unknown(String),
 }
@@ -84,6 +96,22 @@ impl From<AppError> for CommandError {
             },
             AppError::CodexDetection(message) => Self {
                 code: "CODEX_DETECTION_ERROR".to_owned(),
+                message,
+            },
+            AppError::CodexNotFound(message) => Self {
+                code: "CODEX_NOT_FOUND".to_owned(),
+                message,
+            },
+            AppError::AppServerUnavailable(message) => Self {
+                code: "APP_SERVER_UNAVAILABLE".to_owned(),
+                message,
+            },
+            AppError::AppServerStart(message) => Self {
+                code: "APP_SERVER_START_ERROR".to_owned(),
+                message,
+            },
+            AppError::AppServerStop(message) => Self {
+                code: "APP_SERVER_STOP_ERROR".to_owned(),
                 message,
             },
             AppError::Unknown(message) => Self {

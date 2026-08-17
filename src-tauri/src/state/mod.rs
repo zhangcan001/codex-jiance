@@ -1,12 +1,14 @@
 use std::path::PathBuf;
+use std::sync::Arc;
 
 use sqlx::SqlitePool;
 
-use crate::database::Database;
+use crate::{codex::app_server::AppServerManager, database::Database};
 
 pub struct AppState {
     pub db_pool: SqlitePool,
     pub database_path: PathBuf,
+    pub app_server_manager: Arc<AppServerManager>,
 }
 
 impl AppState {
@@ -14,6 +16,7 @@ impl AppState {
         Self {
             db_pool: database.pool,
             database_path: database.path,
+            app_server_manager: Arc::new(AppServerManager::new()),
         }
     }
 }

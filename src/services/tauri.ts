@@ -1,6 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { CodexInstallationInfo } from "../types/codex";
+import type { AppServerStatusInfo, CodexInstallationInfo } from "../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
 
 export class TauriServiceError extends Error {
@@ -56,4 +56,16 @@ export function getDatabaseStatus(): Promise<DatabaseStatus> {
 
 export function detectCodexEnvironment(): Promise<CodexInstallationInfo> {
   return invokeCommand<CodexInstallationInfo>("detect_codex_environment");
+}
+
+export function startCodexAppServer(): Promise<AppServerStatusInfo> {
+  return invokeCommand<AppServerStatusInfo>("start_codex_app_server");
+}
+
+export function stopCodexAppServer(): Promise<AppServerStatusInfo> {
+  return invokeCommand<AppServerStatusInfo>("stop_codex_app_server");
+}
+
+export function getCodexAppServerStatus(): Promise<AppServerStatusInfo> {
+  return invokeCommand<AppServerStatusInfo>("get_codex_app_server_status");
 }

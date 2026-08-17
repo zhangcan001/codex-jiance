@@ -13,3 +13,24 @@ pub struct CodexInstallationInfo {
     pub detected_at: i64,
     pub message: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum AppServerStatus {
+    Stopped,
+    Starting,
+    Running,
+    Stopping,
+    Failed,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct AppServerStatusInfo {
+    pub status: AppServerStatus,
+    pub pid: Option<u32>,
+    pub started_at: Option<i64>,
+    pub executable_path: Option<String>,
+    pub transport: String,
+    pub last_error: Option<String>,
+}

@@ -1,10 +1,10 @@
 # Codex Usage Monitor
 
-Codex Usage Monitor is a Windows desktop application for local Codex usage monitoring. The current milestone keeps the DEV-001 foundation and adds safe local Codex CLI environment detection. Account and usage integration is intentionally not included yet.
+Codex Usage Monitor is a Windows desktop application for local Codex usage monitoring. The current milestone keeps the DEV-002 CLI detection foundation and adds safe local Codex App Server process lifecycle control. Account and usage integration is intentionally not included yet.
 
 ## Current development stage
 
-`DEV-002 — Codex CLI installation status, version, executable path, and App Server capability detection`
+`DEV-003 — Codex App Server Process Manager`
 
 ## Technology stack
 
@@ -71,7 +71,7 @@ src-tauri/
 ├─ migrations/          # SQLx migrations
 └─ src/
    ├─ commands/          # Tauri commands
-   ├─ codex/              # CLI discovery and bounded process checks
+   ├─ codex/              # CLI discovery and App Server process lifecycle
    ├─ database/          # SQLite pool and migration coordination
    ├─ error/             # Unified backend and command errors
    ├─ models/            # Serializable backend response models
@@ -88,7 +88,7 @@ On Windows the default database file is:
 
 The current migration creates `app_meta`, `settings`, and `schema_info`, and records schema version `1`.
 
-## DEV-002 currently provides
+## DEV-003 currently provides
 
 - Tauri desktop shell
 - React frontend
@@ -105,19 +105,30 @@ The current migration creates `app_meta`, `settings`, and `schema_info`, and rec
 - Version parsing, executable path, source, timestamp, and capability status in the Dashboard
 - Windows `.cmd`/`.bat` execution through `cmd.exe /D /S /C`
 - Five-second process timeout handling with child cleanup on timeout
+- Long-running `codex app-server --listen stdio://` startup
+- In-memory App Server lifecycle state: stopped, starting, running, stopping, failed
+- PID and startup timestamp tracking
+- stdin/stdout preservation for the future JSON-RPC client
+- Bounded stderr diagnostic logging
+- Idempotent start/stop and live process status refresh
+- Windows process-tree cleanup for `.cmd`/`.bat` wrappers
+- Application-exit cleanup through the Tauri lifecycle
 
 ## Not implemented yet
 
-Codex account and usage monitoring is not implemented yet.
+JSON-RPC communication, account information, and usage monitoring are not implemented yet.
 
-The following remain intentionally out of scope for DEV-002:
+The following remain intentionally out of scope for DEV-003:
 
-- Starting a long-running Codex App Server process
-- JSON-RPC, account, authentication, rate-limit, token-usage, or credit data
+- JSON-RPC communication or the initialization handshake
+- Account, authentication, rate-limit, token-usage, or credit data
+- Codex model calls, Threads, or Turns
 - API-equivalent cost calculation
 - System tray or startup integration
 - HTTP requests, cookie access, or authentication file access
 
+The database schema remains at version `1`; App Server lifecycle state is kept in memory.
+
 ## Next stage
 
-`DEV-003 — Codex App Server lifecycle and local usage data integration`
+`DEV-004 — Codex App Server JSON-RPC Client`

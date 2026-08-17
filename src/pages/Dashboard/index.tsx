@@ -2,16 +2,19 @@ import { useCallback, useEffect, useRef, useState } from "react";
 
 import { ErrorState } from "../../components/common/ErrorState";
 import { LoadingState } from "../../components/common/LoadingState";
-import { StatusBadge } from "../../components/common/StatusBadge";
+import { StatusBadge, type StatusVariant } from "../../components/common/StatusBadge";
 import { MetricCard } from "../../components/dashboard/MetricCard";
 import { PlaceholderCard } from "../../components/dashboard/PlaceholderCard";
 import {
   detectCodexEnvironment,
   getAppInfo,
+  getCodexAppServerStatus,
   getDatabaseStatus,
   healthCheck,
+  startCodexAppServer,
+  stopCodexAppServer,
 } from "../../services/tauri";
-import type { CodexInstallationInfo } from "../../types/codex";
+import type { AppServerStatus, AppServerStatusInfo, CodexInstallationInfo } from "../../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../../types/system";
 
 interface DashboardSnapshot {
@@ -19,6 +22,8 @@ interface DashboardSnapshot {
   health: HealthStatus;
   database: DatabaseStatus;
 }
+
+type AppServerAction = "start" | "stop" | null;
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.length > 0) {
@@ -28,6 +33,64 @@ function getErrorMessage(error: unknown): string {
   return "The backend did not return a usable system status.";
 }
 
+function isActiveAppServerStatus(status: AppServerStatus): boolean {
+  return status === "running" || status === "starting" || status === "stopping";
+}
+
+function getAppServerStatusLabel(
+  status: AppServerStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  if (error && !status) {
+    return "Error";
+  }
+
+  switch (status) {
+    case "starting":
+      return "Starting...";
+    case "running":
+      return "Running";
+    case "stopping":
+      return "Stopping...";
+    case "failed":
+      return "Failed";
+    case "stopped":
+    default:
+      return "Stopped";
+  }
+}
+
+function getAppServerStatusVariant(
+  status: AppServerStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): StatusVariant {
+  if (isLoading) {
+    return "warning";
+  }
+  if (error && !status) {
+    return "error";
+  }
+  if (status === "running") {
+    return "success";
+  }
+  if (status === "failed") {
+    return "error";
+  }
+  if (status === "starting" || status === "stopping") {
+    return "warning";
+  }
+  return "neutral";
+}
+
+function formatStartedAt(timestamp: number | null): string {
+  return timestamp === null ? "--" : new Date(timestamp * 1000).toLocaleString();
+}
+
 export default function DashboardPage() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -35,7 +98,12 @@ export default function DashboardPage() {
   const [codexInfo, setCodexInfo] = useState<CodexInstallationInfo | null>(null);
   const [codexError, setCodexError] = useState<string | null>(null);
   const [isCodexLoading, setIsCodexLoading] = useState(true);
+  const [appServerInfo, setAppServerInfo] = useState<AppServerStatusInfo | null>(null);
+  const [appServerError, setAppServerError] = useState<string | null>(null);
+  const [isAppServerLoading, setIsAppServerLoading] = useState(true);
+  const [appServerAction, setAppServerAction] = useState<AppServerAction>(null);
   const hasLoadedCodexRef = useRef(false);
+  const hasLoadedAppServerRef = useRef(false);
 
   const loadSystemStatus = useCallback(async () => {
     setIsLoading(true);
@@ -70,15 +138,107 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadAppServerStatus = useCallback(async (showLoading = false) => {
+    if (showLoading) {
+      setIsAppServerLoading(true);
+    }
+
+    try {
+      setAppServerInfo(await getCodexAppServerStatus());
+      setAppServerError(null);
+    } catch (loadError: unknown) {
+      setAppServerError(getErrorMessage(loadError));
+    } finally {
+      if (showLoading) {
+        setIsAppServerLoading(false);
+      }
+    }
+  }, []);
+
+  const handleStartAppServer = useCallback(async () => {
+    setAppServerAction("start");
+    setAppServerError(null);
+
+    try {
+      setAppServerInfo(await startCodexAppServer());
+    } catch (startError: unknown) {
+      setAppServerError(getErrorMessage(startError));
+      await loadAppServerStatus();
+    } finally {
+      setAppServerAction(null);
+    }
+  }, [loadAppServerStatus]);
+
+  const handleStopAppServer = useCallback(async () => {
+    setAppServerAction("stop");
+    setAppServerError(null);
+
+    try {
+      setAppServerInfo(await stopCodexAppServer());
+    } catch (stopError: unknown) {
+      setAppServerError(getErrorMessage(stopError));
+      await loadAppServerStatus();
+    } finally {
+      setAppServerAction(null);
+    }
+  }, [loadAppServerStatus]);
+
   useEffect(() => {
     void loadSystemStatus();
     if (!hasLoadedCodexRef.current) {
       hasLoadedCodexRef.current = true;
       void loadCodexEnvironment();
     }
-  }, [loadCodexEnvironment, loadSystemStatus]);
+    if (!hasLoadedAppServerRef.current) {
+      hasLoadedAppServerRef.current = true;
+      void loadAppServerStatus(true);
+    }
+  }, [loadAppServerStatus, loadCodexEnvironment, loadSystemStatus]);
+
+  useEffect(() => {
+    if (!appServerInfo || !isActiveAppServerStatus(appServerInfo.status)) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      void loadAppServerStatus();
+    }, 2000);
+
+    return () => window.clearInterval(intervalId);
+  }, [appServerInfo?.status, loadAppServerStatus]);
 
   const systemReady = snapshot !== null && error === null;
+  const appServerStatus = appServerInfo?.status ?? null;
+  const appServerStatusLabel = getAppServerStatusLabel(
+    appServerStatus,
+    isAppServerLoading,
+    appServerError,
+  );
+  const appServerStatusVariant = getAppServerStatusVariant(
+    appServerStatus,
+    isAppServerLoading,
+    appServerError,
+  );
+  const appServerBusy = isAppServerLoading || appServerAction !== null;
+  const canStartAppServer =
+    !appServerBusy &&
+    (appServerStatus === "stopped" || appServerStatus === "failed") &&
+    codexInfo?.installed === true &&
+    codexInfo.appServerSupported === true;
+  const canStopAppServer = !appServerBusy && appServerStatus === "running";
+  const appServerMessage = appServerError
+    ? appServerError
+    : appServerInfo?.lastError
+      ? appServerInfo.lastError
+      : isCodexLoading
+        ? "Checking Codex CLI capability..."
+        : codexError
+          ? codexError
+          : !codexInfo?.installed
+            ? "Codex CLI is required before App Server can start."
+            : !codexInfo.appServerSupported
+              ? "This Codex CLI does not expose App Server."
+              : null;
   const codexCardValue = isCodexLoading
     ? "Detecting…"
     : codexError
@@ -200,6 +360,53 @@ export default function DashboardPage() {
         ) : null}
       </section>
 
+      <section className="section-block" aria-labelledby="app-server-process-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Local process control</p>
+            <h2 id="app-server-process-heading">App Server Process</h2>
+          </div>
+          <div className="section-heading__actions">
+            <StatusBadge variant={appServerStatusVariant}>{appServerStatusLabel}</StatusBadge>
+            <button
+              className="button button--secondary button--compact"
+              type="button"
+              onClick={() => void handleStartAppServer()}
+              disabled={!canStartAppServer}
+            >
+              {appServerAction === "start" ? "Starting..." : "Start App Server"}
+            </button>
+            <button
+              className="button button--secondary button--compact"
+              type="button"
+              onClick={() => void handleStopAppServer()}
+              disabled={!canStopAppServer}
+            >
+              {appServerAction === "stop" ? "Stopping..." : "Stop App Server"}
+            </button>
+          </div>
+        </div>
+        <div className="codex-environment app-server-process">
+          <div className="codex-row">
+            <span>Status</span>
+            <strong>{appServerStatusLabel}</strong>
+          </div>
+          <div className="codex-row">
+            <span>PID</span>
+            <strong>{appServerInfo?.pid ?? "--"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Transport</span>
+            <strong>{appServerInfo?.transport ?? "stdio"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Started</span>
+            <strong>{formatStartedAt(appServerInfo?.startedAt ?? null)}</strong>
+          </div>
+        </div>
+        {appServerMessage ? <p className="codex-message">{appServerMessage}</p> : null}
+      </section>
+
       <section className="section-block" aria-labelledby="system-status-heading">
         <div className="section-heading">
           <div>
@@ -239,8 +446,9 @@ export default function DashboardPage() {
         <div>
           <h2>Local-first foundation</h2>
           <p>
-            DEV-002 adds safe local Codex CLI discovery, version detection, and App Server
-            capability checks. Account and usage monitoring are intentionally not connected yet.
+            DEV-003 adds bounded App Server process lifecycle control while keeping stdin and
+            stdout reserved for the future JSON-RPC client. Account and usage monitoring are not
+            connected yet.
           </p>
         </div>
       </section>
