@@ -36,3 +36,38 @@ export interface AppServerStatusInfo {
   platformOs: string | null;
   lastError: string | null;
 }
+
+export type SchemaCompatibilityStatus =
+  | "compatible"
+  | "limited"
+  | "incompatible"
+  | "unavailable"
+  | "error";
+
+export type CompatibilityCheckCategory = "method" | "field" | "feature";
+
+export interface CompatibilityCheck {
+  key: string;
+  category: CompatibilityCheckCategory;
+  required: boolean;
+  present: boolean;
+}
+
+export interface SchemaCompatibilityReport {
+  status: SchemaCompatibilityStatus;
+  codexVersion: string | null;
+  checkedAt: number;
+  schemaGenerated: boolean;
+  stableSurface: boolean;
+  schemaFileCount: number;
+  schemaTotalBytes: number;
+  requiredPassed: number;
+  requiredTotal: number;
+  optionalPassed: number;
+  optionalTotal: number;
+  coreMonitoringCompatible: boolean;
+  advancedThreadUsageSupported: boolean;
+  checks: CompatibilityCheck[];
+  warnings: string[];
+  message: string | null;
+}

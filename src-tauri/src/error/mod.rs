@@ -42,6 +42,12 @@ pub enum AppError {
     #[error("App Server initialization failed: {0}")]
     AppServerInitialization(String),
 
+    #[error("Schema compatibility error: {0}")]
+    SchemaCompatibility(String),
+
+    #[error("Schema generation is unavailable: {0}")]
+    SchemaGenerationUnavailable(String),
+
     #[error("App Server stop failed: {0}")]
     AppServerStop(String),
 
@@ -127,6 +133,14 @@ impl From<AppError> for CommandError {
             },
             AppError::AppServerInitialization(message) => Self {
                 code: "APP_SERVER_INITIALIZATION_ERROR".to_owned(),
+                message,
+            },
+            AppError::SchemaCompatibility(message) => Self {
+                code: "SCHEMA_COMPATIBILITY_ERROR".to_owned(),
+                message,
+            },
+            AppError::SchemaGenerationUnavailable(message) => Self {
+                code: "SCHEMA_GENERATION_UNAVAILABLE".to_owned(),
                 message,
             },
             AppError::AppServerStop(message) => Self {

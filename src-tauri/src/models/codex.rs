@@ -48,3 +48,51 @@ pub struct AppServerStatusInfo {
     pub platform_os: Option<String>,
     pub last_error: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum SchemaCompatibilityStatus {
+    Compatible,
+    Limited,
+    Incompatible,
+    Unavailable,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub enum CompatibilityCheckCategory {
+    Method,
+    Field,
+    Feature,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct CompatibilityCheck {
+    pub key: String,
+    pub category: CompatibilityCheckCategory,
+    pub required: bool,
+    pub present: bool,
+}
+
+#[derive(Debug, Clone, Serialize, PartialEq, Eq)]
+#[serde(rename_all = "camelCase")]
+pub struct SchemaCompatibilityReport {
+    pub status: SchemaCompatibilityStatus,
+    pub codex_version: Option<String>,
+    pub checked_at: i64,
+    pub schema_generated: bool,
+    pub stable_surface: bool,
+    pub schema_file_count: usize,
+    pub schema_total_bytes: u64,
+    pub required_passed: usize,
+    pub required_total: usize,
+    pub optional_passed: usize,
+    pub optional_total: usize,
+    pub core_monitoring_compatible: bool,
+    pub advanced_thread_usage_supported: bool,
+    pub checks: Vec<CompatibilityCheck>,
+    pub warnings: Vec<String>,
+    pub message: Option<String>,
+}

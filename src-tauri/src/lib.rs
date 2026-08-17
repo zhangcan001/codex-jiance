@@ -46,7 +46,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::detect_codex_environment,
             commands::codex::start_codex_app_server,
             commands::codex::stop_codex_app_server,
-            commands::codex::get_codex_app_server_status
+            commands::codex::get_codex_app_server_status,
+            commands::codex::check_codex_schema_compatibility
         ])
         .build(tauri::generate_context!())?;
 

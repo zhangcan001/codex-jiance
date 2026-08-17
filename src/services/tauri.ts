@@ -1,6 +1,10 @@
 import { invoke } from "@tauri-apps/api/core";
 
-import type { AppServerStatusInfo, CodexInstallationInfo } from "../types/codex";
+import type {
+  AppServerStatusInfo,
+  CodexInstallationInfo,
+  SchemaCompatibilityReport,
+} from "../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
 
 export class TauriServiceError extends Error {
@@ -34,9 +38,9 @@ function normalizeTauriError(error: unknown): TauriServiceError {
   return new TauriServiceError("UNKNOWN_ERROR", "The backend command failed.");
 }
 
-async function invokeCommand<T>(command: string): Promise<T> {
+async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {
   try {
-    return await invoke<T>(command);
+    return await invoke<T>(command, args);
   } catch (error: unknown) {
     throw normalizeTauriError(error);
   }
@@ -68,4 +72,10 @@ export function stopCodexAppServer(): Promise<AppServerStatusInfo> {
 
 export function getCodexAppServerStatus(): Promise<AppServerStatusInfo> {
   return invokeCommand<AppServerStatusInfo>("get_codex_app_server_status");
+}
+
+export function checkCodexSchemaCompatibility(
+  force = false,
+): Promise<SchemaCompatibilityReport> {
+  return invokeCommand<SchemaCompatibilityReport>("check_codex_schema_compatibility", { force });
 }

@@ -15,6 +15,14 @@ pub struct ProcessOutput {
 }
 
 pub async fn run_command(executable: &Path, args: &[&str]) -> Result<ProcessOutput, AppError> {
+    run_command_with_timeout(executable, args, COMMAND_TIMEOUT).await
+}
+
+pub async fn run_command_with_timeout(
+    executable: &Path,
+    args: &[&str],
+    command_timeout: Duration,
+) -> Result<ProcessOutput, AppError> {
     let mut command = if is_windows_script(executable) {
         let mut command = Command::new("cmd.exe");
         let command_line = format!("\"{}\"", build_cmd_line(executable, args));
@@ -34,12 +42,12 @@ pub async fn run_command(executable: &Path, args: &[&str]) -> Result<ProcessOutp
         .stdout(Stdio::piped())
         .stderr(Stdio::piped());
 
-    let output = timeout(COMMAND_TIMEOUT, command.output())
+    let output = timeout(command_timeout, command.output())
         .await
         .map_err(|_| {
             AppError::ProcessTimeout(format!(
                 "Codex command timed out after {} seconds.",
-                COMMAND_TIMEOUT.as_secs()
+                command_timeout.as_secs()
             ))
         })?
         .map_err(|error| {

@@ -7,6 +7,7 @@ import { MetricCard } from "../../components/dashboard/MetricCard";
 import { PlaceholderCard } from "../../components/dashboard/PlaceholderCard";
 import {
   detectCodexEnvironment,
+  checkCodexSchemaCompatibility,
   getAppInfo,
   getCodexAppServerStatus,
   getDatabaseStatus,
@@ -19,6 +20,8 @@ import type {
   AppServerStatusInfo,
   CodexInstallationInfo,
   ProtocolHandshakeStatus,
+  SchemaCompatibilityReport,
+  SchemaCompatibilityStatus,
 } from "../../types/codex";
 import type { AppInfo, DatabaseStatus, HealthStatus } from "../../types/system";
 
@@ -167,6 +170,81 @@ function formatStartedAt(timestamp: number | null): string {
   return timestamp === null ? "--" : new Date(timestamp * 1000).toLocaleString();
 }
 
+function getCompatibilityStatusLabel(
+  status: SchemaCompatibilityStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  if (error && !status) {
+    return "Error";
+  }
+
+  switch (status) {
+    case "compatible":
+      return "Compatible";
+    case "limited":
+      return "Limited";
+    case "incompatible":
+      return "Incompatible";
+    case "unavailable":
+      return "Unavailable";
+    case "error":
+      return "Error";
+    default:
+      return "Checking...";
+  }
+}
+
+function getCompatibilityStatusVariant(
+  status: SchemaCompatibilityStatus | null,
+  isLoading: boolean,
+  error: string | null,
+): StatusVariant {
+  if (isLoading) {
+    return "warning";
+  }
+  if (error && !status) {
+    return "error";
+  }
+
+  switch (status) {
+    case "compatible":
+      return "success";
+    case "limited":
+      return "warning";
+    case "incompatible":
+    case "error":
+      return "error";
+    case "unavailable":
+    default:
+      return "neutral";
+  }
+}
+
+function formatSchemaBytes(bytes: number): string {
+  if (bytes < 1024) {
+    return `${bytes} B`;
+  }
+  if (bytes < 1024 * 1024) {
+    return `${(bytes / 1024).toFixed(1)} KB`;
+  }
+  return `${(bytes / (1024 * 1024)).toFixed(2)} MB`;
+}
+
+function formatCompatibilitySurface(report: SchemaCompatibilityReport | null): string {
+  if (!report) {
+    return "--";
+  }
+  if (!report.schemaGenerated) {
+    return "Unavailable";
+  }
+
+  return `${report.stableSurface ? "Stable" : "Unstable"} · ${report.schemaFileCount} files · ${formatSchemaBytes(report.schemaTotalBytes)}`;
+}
+
 export default function DashboardPage() {
   const [snapshot, setSnapshot] = useState<DashboardSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -178,8 +256,12 @@ export default function DashboardPage() {
   const [appServerError, setAppServerError] = useState<string | null>(null);
   const [isAppServerLoading, setIsAppServerLoading] = useState(true);
   const [appServerAction, setAppServerAction] = useState<AppServerAction>(null);
+  const [compatibilityInfo, setCompatibilityInfo] = useState<SchemaCompatibilityReport | null>(null);
+  const [compatibilityError, setCompatibilityError] = useState<string | null>(null);
+  const [isCompatibilityLoading, setIsCompatibilityLoading] = useState(false);
   const hasLoadedCodexRef = useRef(false);
   const hasLoadedAppServerRef = useRef(false);
+  const hasLoadedCompatibilityRef = useRef(false);
 
   const loadSystemStatus = useCallback(async () => {
     setIsLoading(true);
@@ -228,6 +310,20 @@ export default function DashboardPage() {
       if (showLoading) {
         setIsAppServerLoading(false);
       }
+    }
+  }, []);
+
+  const loadCompatibility = useCallback(async (force = false) => {
+    setIsCompatibilityLoading(true);
+    setCompatibilityError(null);
+
+    try {
+      setCompatibilityInfo(await checkCodexSchemaCompatibility(force));
+    } catch (loadError: unknown) {
+      setCompatibilityInfo(null);
+      setCompatibilityError(getErrorMessage(loadError));
+    } finally {
+      setIsCompatibilityLoading(false);
     }
   }, []);
 
@@ -283,6 +379,19 @@ export default function DashboardPage() {
     return () => window.clearInterval(intervalId);
   }, [appServerInfo?.status, loadAppServerStatus]);
 
+  useEffect(() => {
+    if (
+      hasLoadedCompatibilityRef.current ||
+      codexInfo?.installed !== true ||
+      codexInfo.appServerSupported !== true
+    ) {
+      return;
+    }
+
+    hasLoadedCompatibilityRef.current = true;
+    void loadCompatibility();
+  }, [codexInfo, loadCompatibility]);
+
   const systemReady = snapshot !== null && error === null;
   const appServerStatus = appServerInfo?.status ?? null;
   const appServerStatusLabel = getAppServerStatusLabel(
@@ -329,6 +438,28 @@ export default function DashboardPage() {
             : !codexInfo.appServerSupported
               ? "This Codex CLI does not expose App Server."
               : null;
+  const compatibilityStatus =
+    compatibilityInfo?.status ??
+    (compatibilityError
+      ? "error"
+      : codexInfo && (!codexInfo.installed || !codexInfo.appServerSupported)
+        ? "unavailable"
+        : null);
+  const compatibilityStatusLabel = getCompatibilityStatusLabel(
+    compatibilityStatus,
+    isCompatibilityLoading,
+    compatibilityError,
+  );
+  const compatibilityStatusVariant = getCompatibilityStatusVariant(
+    compatibilityStatus,
+    isCompatibilityLoading,
+    compatibilityError,
+  );
+  const missingRequiredCapabilities =
+    compatibilityInfo?.checks.filter((check) => check.required && !check.present) ?? [];
+  const missingOptionalCapabilities =
+    compatibilityInfo?.checks.filter((check) => !check.required && !check.present) ?? [];
+  const compatibilityMessage = compatibilityError ?? compatibilityInfo?.message;
   const codexCardValue = isCodexLoading
     ? "Detecting…"
     : codexError
@@ -450,6 +581,113 @@ export default function DashboardPage() {
         ) : null}
       </section>
 
+      <section className="section-block" aria-labelledby="protocol-compatibility-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Installed protocol inspection</p>
+            <h2 id="protocol-compatibility-heading">Protocol Compatibility</h2>
+          </div>
+          <div className="section-heading__actions">
+            <StatusBadge variant={compatibilityStatusVariant}>
+              {compatibilityStatusLabel}
+            </StatusBadge>
+            <button
+              className="button button--secondary button--compact"
+              type="button"
+              onClick={() => void loadCompatibility(true)}
+              disabled={
+                isCompatibilityLoading ||
+                codexInfo?.installed !== true ||
+                codexInfo.appServerSupported !== true
+              }
+            >
+              {isCompatibilityLoading ? "Checking…" : "Refresh"}
+            </button>
+          </div>
+        </div>
+        <div className="codex-environment protocol-compatibility">
+          <div className="codex-row">
+            <span>Status</span>
+            <StatusBadge variant={compatibilityStatusVariant}>
+              {compatibilityStatusLabel}
+            </StatusBadge>
+          </div>
+          <div className="codex-row">
+            <span>Codex Version</span>
+            <strong>{compatibilityInfo?.codexVersion ?? codexInfo?.version ?? "--"}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Schema Surface</span>
+            <strong>{formatCompatibilitySurface(compatibilityInfo)}</strong>
+          </div>
+          <div className="codex-row">
+            <span>Core Monitoring</span>
+            <strong>
+              {compatibilityInfo
+                ? compatibilityInfo.coreMonitoringCompatible
+                  ? "Supported"
+                  : "Unsupported"
+                : "--"}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Required Checks</span>
+            <strong>
+              {compatibilityInfo
+                ? `${compatibilityInfo.requiredPassed} / ${compatibilityInfo.requiredTotal}`
+                : "--"}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Optional Checks</span>
+            <strong>
+              {compatibilityInfo
+                ? `${compatibilityInfo.optionalPassed} / ${compatibilityInfo.optionalTotal}`
+                : "--"}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Live Thread Usage</span>
+            <strong>
+              {compatibilityInfo
+                ? compatibilityInfo.advancedThreadUsageSupported
+                  ? "Supported"
+                  : "Unavailable"
+                : "--"}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Last Checked</span>
+            <strong>{formatStartedAt(compatibilityInfo?.checkedAt ?? null)}</strong>
+          </div>
+        </div>
+        {missingRequiredCapabilities.length > 0 ? (
+          <div className="compatibility-missing">
+            <span>Missing required capabilities</span>
+            <ul>
+              {missingRequiredCapabilities.map((check) => (
+                <li key={check.key}>
+                  <code>{check.key}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {missingOptionalCapabilities.length > 0 ? (
+          <div className="compatibility-missing">
+            <span>Missing optional capabilities</span>
+            <ul>
+              {missingOptionalCapabilities.map((check) => (
+                <li key={check.key}>
+                  <code>{check.key}</code>
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+        {compatibilityMessage ? <p className="codex-message">{compatibilityMessage}</p> : null}
+      </section>
+
       <section className="section-block" aria-labelledby="app-server-process-heading">
         <div className="section-heading">
           <div>
@@ -568,8 +806,8 @@ export default function DashboardPage() {
         <div>
           <h2>Local-first foundation</h2>
           <p>
-            DEV-005 completes the App Server protocol handshake and records the server runtime
-            metadata. Account and usage monitoring are not connected yet.
+            DEV-006 validates the installed Codex CLI against its stable locally generated App
+            Server schema. Account and usage monitoring are not connected yet.
           </p>
         </div>
       </section>
