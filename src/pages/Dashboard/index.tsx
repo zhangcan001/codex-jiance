@@ -15,6 +15,7 @@ import {
   getAppInfo,
   getCodexAccount,
   getCodexAppServerStatus,
+  getCodexBurnRates,
   getCodexRateLimits,
   getCodexUsage,
   getDatabaseStatus,
@@ -26,6 +27,7 @@ import type {
   AccountStatus,
   AppServerStatus,
   AppServerStatusInfo,
+  BurnRateEstimate,
   CodexAccountInfo,
   CodexInstallationInfo,
   CodexUsageInfo,
@@ -341,6 +343,29 @@ function rateLimitCardSubtitle(
     : "Official window not reported";
 }
 
+function findBurnRateEstimate(
+  estimates: BurnRateEstimate[],
+  durationMins: number,
+): BurnRateEstimate | null {
+  return estimates.find((estimate) => estimate.windowDurationMins === durationMins) ?? null;
+}
+
+function formatBurnRate(estimate: BurnRateEstimate | null, isLoading: boolean): string {
+  if (isLoading) {
+    return "Checking...";
+  }
+  if (!estimate || estimate.status === "insufficientData") {
+    return "Insufficient data";
+  }
+  if (estimate.status !== "available" || estimate.burnRatePercentPointsPerHour === null) {
+    return estimate.status === "error" ? "Error" : "Unavailable";
+  }
+  if (!Number.isFinite(estimate.burnRatePercentPointsPerHour)) {
+    return "Unavailable";
+  }
+  return `${estimate.burnRatePercentPointsPerHour.toFixed(1)} pp/hour`;
+}
+
 function getUsageStatusLabel(
   status: UsageStatus | null,
   isLoading: boolean,
@@ -505,6 +530,9 @@ export default function DashboardPage() {
   const [rateLimitInfo, setRateLimitInfo] = useState<RateLimitInfo | null>(null);
   const [rateLimitError, setRateLimitError] = useState<string | null>(null);
   const [isRateLimitLoading, setIsRateLimitLoading] = useState(false);
+  const [burnRateEstimates, setBurnRateEstimates] = useState<BurnRateEstimate[]>([]);
+  const [burnRateError, setBurnRateError] = useState<string | null>(null);
+  const [isBurnRateLoading, setIsBurnRateLoading] = useState(false);
   const [usageInfo, setUsageInfo] = useState<CodexUsageInfo | null>(null);
   const [usageError, setUsageError] = useState<string | null>(null);
   const [isUsageLoading, setIsUsageLoading] = useState(false);
@@ -630,9 +658,28 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const loadBurnRates = useCallback(async (force = false) => {
+    setIsBurnRateLoading(true);
+    setBurnRateError(null);
+
+    try {
+      setBurnRateEstimates(await getCodexBurnRates(force));
+    } catch (loadError: unknown) {
+      setBurnRateEstimates([]);
+      setBurnRateError(getErrorMessage(loadError));
+    } finally {
+      setIsBurnRateLoading(false);
+    }
+  }, []);
+
   const refreshDashboardData = useCallback(async () => {
-    await Promise.allSettled([loadAccount(true), loadRateLimits(true), loadUsage(true)]);
-  }, [loadAccount, loadRateLimits, loadUsage]);
+    await Promise.allSettled([
+      loadAccount(true),
+      loadRateLimits(true),
+      loadUsage(true),
+      loadBurnRates(true),
+    ]);
+  }, [loadAccount, loadBurnRates, loadRateLimits, loadUsage]);
 
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
@@ -760,6 +807,21 @@ export default function DashboardPage() {
 
     return () => window.clearInterval(intervalId);
   }, [accountReady, loadUsage]);
+
+  useEffect(() => {
+    if (!accountReady) {
+      setBurnRateEstimates([]);
+      setBurnRateError(null);
+      return;
+    }
+
+    void loadBurnRates();
+    const intervalId = window.setInterval(() => {
+      void loadBurnRates();
+    }, 60_000);
+
+    return () => window.clearInterval(intervalId);
+  }, [accountReady, loadBurnRates]);
 
   useEffect(() => {
     if (
@@ -941,6 +1003,9 @@ export default function DashboardPage() {
     ? usageError ?? visibleUsageInfo?.message
     : "Start the Codex App Server to read usage information.";
   const recentUsageBuckets = getRecentUsageBuckets(visibleUsageInfo);
+  const visibleBurnRateEstimates = accountReady ? burnRateEstimates : [];
+  const fiveHourBurnRate = findBurnRateEstimate(visibleBurnRateEstimates, 300);
+  const weeklyBurnRate = findBurnRateEstimate(visibleBurnRateEstimates, 10080);
 
   return (
     <div className="page page--dashboard">
@@ -963,9 +1028,17 @@ export default function DashboardPage() {
             className="button button--secondary button--compact"
             type="button"
             onClick={() => void refreshDashboardData()}
-            disabled={!accountReady || isAccountLoading || isRateLimitLoading || isUsageLoading}
+            disabled={
+              !accountReady ||
+              isAccountLoading ||
+              isRateLimitLoading ||
+              isUsageLoading ||
+              isBurnRateLoading
+            }
           >
-            {isAccountLoading || isRateLimitLoading || isUsageLoading ? "Refreshing…" : "Refresh Data"}
+            {isAccountLoading || isRateLimitLoading || isUsageLoading || isBurnRateLoading
+              ? "Refreshing…"
+              : "Refresh Data"}
           </button>
           {snapshot ? (
             <span className="environment-label">
@@ -1058,6 +1131,34 @@ export default function DashboardPage() {
             label="Derived"
           />
         </div>
+      </section>
+
+      <section className="section-block" aria-labelledby="estimated-analytics-heading">
+        <div className="section-heading">
+          <div>
+            <p className="section-kicker">Derived from official rate-limit history</p>
+            <h2 id="estimated-analytics-heading">Estimated Analytics</h2>
+          </div>
+          <StatusBadge variant={burnRateError ? "error" : "warning"}>Estimated</StatusBadge>
+        </div>
+        <div className="metric-grid metric-grid--two">
+          <MetricCard
+            title="5 Hour Burn Rate"
+            value={formatBurnRate(fiveHourBurnRate, isBurnRateLoading)}
+            subtitle="Percentage points consumed per hour"
+            label="Estimated"
+          />
+          <MetricCard
+            title="Weekly Burn Rate"
+            value={formatBurnRate(weeklyBurnRate, isBurnRateLoading)}
+            subtitle="Percentage points consumed per hour"
+            label="Estimated"
+          />
+        </div>
+        {burnRateError ? <p className="codex-message">{burnRateError}</p> : null}
+        {!accountReady ? (
+          <p className="codex-message">Start the Codex App Server to estimate burn rate.</p>
+        ) : null}
       </section>
 
       <details className="diagnostics-panel">

@@ -5,6 +5,7 @@ use sqlx::SqlitePool;
 
 use crate::{
     account::AccountService,
+    burn_rate::BurnRateService,
     codex::app_server::{AppServerManager, SchemaCompatibilityService},
     database::Database,
     rate_limit::{RateLimitRepository, RateLimitService},
@@ -17,7 +18,10 @@ pub struct AppState {
     pub app_server_manager: Arc<AppServerManager>,
     pub schema_compatibility_service: Arc<SchemaCompatibilityService>,
     pub account_service: Arc<AccountService>,
+    #[allow(dead_code)]
+    pub rate_limit_repository: Arc<RateLimitRepository>,
     pub rate_limit_service: Arc<RateLimitService>,
+    pub burn_rate_service: Arc<BurnRateService>,
     pub usage_service: Arc<UsageService>,
 }
 
@@ -34,7 +38,11 @@ impl AppState {
             Arc::clone(&app_server_manager),
             Arc::clone(&schema_compatibility_service),
             Arc::clone(&account_service),
-            rate_limit_repository,
+            Arc::clone(&rate_limit_repository),
+        ));
+        let burn_rate_service = Arc::new(BurnRateService::new(
+            Arc::clone(&rate_limit_service),
+            Arc::clone(&rate_limit_repository),
         ));
         let usage_service = Arc::new(UsageService::new(
             Arc::clone(&app_server_manager),
@@ -48,7 +56,9 @@ impl AppState {
             app_server_manager,
             schema_compatibility_service,
             account_service,
+            rate_limit_repository,
             rate_limit_service,
+            burn_rate_service,
             usage_service,
         }
     }

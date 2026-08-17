@@ -38,3 +38,9 @@ pub(crate) struct RateLimitInfo {
     pub(crate) updated_at: i64,
     pub(crate) message: Option<String>,
 }
+
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub(crate) struct RateLimitHistorySample {
+    pub(crate) captured_at: i64,
+    pub(crate) used_percent: f64,
+}

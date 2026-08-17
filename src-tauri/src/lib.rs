@@ -1,4 +1,5 @@
 mod account;
+mod burn_rate;
 mod codex;
 mod commands;
 mod database;
@@ -56,6 +57,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::check_codex_schema_compatibility,
             commands::codex::get_codex_account,
             commands::codex::get_codex_rate_limits,
+            commands::codex::get_codex_burn_rates,
             commands::codex::get_codex_usage
         ])
         .on_window_event(|window, event| {

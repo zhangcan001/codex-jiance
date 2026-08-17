@@ -1,5 +1,6 @@
 use crate::{
     account::CodexAccountInfo,
+    burn_rate::BurnRateEstimate,
     codex,
     error::CommandResult,
     models::codex::{AppServerStatusInfo, CodexInstallationInfo, SchemaCompatibilityReport},
@@ -57,6 +58,14 @@ pub async fn get_codex_rate_limits(
     force: bool,
 ) -> CommandResult<RateLimitInfo> {
     Ok(state.rate_limit_service.get_rate_limits(force).await)
+}
+
+#[tauri::command]
+pub async fn get_codex_burn_rates(
+    state: State<'_, AppState>,
+    force: bool,
+) -> CommandResult<Vec<BurnRateEstimate>> {
+    Ok(state.burn_rate_service.get_burn_rates(force).await)
 }
 
 #[tauri::command]

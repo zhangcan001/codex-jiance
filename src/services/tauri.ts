@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AppServerStatusInfo,
+  BurnRateEstimate,
   CodexAccountInfo,
   CodexInstallationInfo,
   CodexUsageInfo,
@@ -89,6 +90,10 @@ export function getCodexAccount(force = false): Promise<CodexAccountInfo> {
 
 export function getCodexRateLimits(force = false): Promise<RateLimitInfo> {
   return invokeCommand<RateLimitInfo>("get_codex_rate_limits", { force });
+}
+
+export function getCodexBurnRates(force = false): Promise<BurnRateEstimate[]> {
+  return invokeCommand<BurnRateEstimate[]>("get_codex_burn_rates", { force });
 }
 
 export function getCodexUsage(force = false): Promise<CodexUsageInfo> {

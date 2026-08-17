@@ -110,6 +110,26 @@ export interface RateLimitInfo {
   message: string | null;
 }
 
+export type BurnRateStatus = "available" | "insufficientData" | "unavailable" | "error";
+
+export interface BurnRateEstimate {
+  status: BurnRateStatus;
+  limitId: string | null;
+  limitName: string | null;
+  windowKind: RateLimitWindowKind | null;
+  windowDurationMins: number | null;
+  resetsAt: number | null;
+  latestUsedPercent: number | null;
+  burnRatePercentPointsPerHour: number | null;
+  sampleCount: number;
+  observedSpanSec: number | null;
+  usedDeltaPercent: number | null;
+  firstObservedAt: number | null;
+  lastObservedAt: number | null;
+  trustClass: "estimated";
+  message: string | null;
+}
+
 export type UsageStatus = "available" | "unavailable" | "error";
 
 export interface UsageSummary {

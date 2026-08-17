@@ -4,7 +4,10 @@ use sqlx::{Row, SqlitePool};
 use crate::{
     account::unix_timestamp,
     error::AppError,
-    rate_limit::model::{RateLimitInfo, RateLimitStatus, RateLimitWindow, RateLimitWindowKind},
+    rate_limit::model::{
+        RateLimitHistorySample, RateLimitInfo, RateLimitStatus, RateLimitWindow,
+        RateLimitWindowKind,
+    },
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -160,6 +163,54 @@ impl RateLimitRepository {
             source: row.try_get("source")?,
             windows,
         }))
+    }
+
+    pub(crate) async fn history_for_window(
+        &self,
+        limit_id: Option<&str>,
+        window_kind: RateLimitWindowKind,
+        window_duration_mins: Option<i64>,
+        resets_at: Option<i64>,
+        max_samples: usize,
+    ) -> Result<Vec<RateLimitHistorySample>, AppError> {
+        let max_samples = i64::try_from(max_samples.min(64)).unwrap_or(64);
+        let rows = sqlx::query(
+            "SELECT s.captured_at, w.used_percent
+             FROM rate_limit_snapshots AS s
+             INNER JOIN rate_limit_windows AS w ON w.snapshot_id = s.id
+             WHERE ((w.limit_id = ? OR (w.limit_id IS NULL AND ? IS NULL))
+                AND w.window_kind = ?
+                AND ((w.window_duration_mins = ?) OR (w.window_duration_mins IS NULL AND ? IS NULL))
+                AND ((w.resets_at = ?) OR (w.resets_at IS NULL AND ? IS NULL)))
+             ORDER BY s.captured_at ASC, s.id ASC, w.id ASC
+             LIMIT ?",
+        )
+        .bind(limit_id)
+        .bind(limit_id)
+        .bind(window_kind_name(window_kind))
+        .bind(window_duration_mins)
+        .bind(window_duration_mins)
+        .bind(resets_at)
+        .bind(resets_at)
+        .bind(max_samples)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut samples: Vec<RateLimitHistorySample> = Vec::with_capacity(rows.len());
+        for row in rows {
+            let sample = RateLimitHistorySample {
+                captured_at: row.try_get("captured_at")?,
+                used_percent: row.try_get("used_percent")?,
+            };
+            if let Some(previous) = samples.last_mut() {
+                if previous.captured_at == sample.captured_at {
+                    *previous = sample;
+                    continue;
+                }
+            }
+            samples.push(sample);
+        }
+        Ok(samples)
     }
 }
 
