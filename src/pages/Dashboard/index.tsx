@@ -304,6 +304,11 @@ function findRateLimitWindow(
   return info?.windows.find((window) => window.windowDurationMins === durationMins) ?? null;
 }
 
+function getRateLimitProgressPercent(info: RateLimitInfo | null, durationMins: number): number | null {
+  const window = findRateLimitWindow(info, durationMins);
+  return window ? Math.min(100, Math.max(0, window.usedPercent)) : null;
+}
+
 function rateLimitCardValue(
   info: RateLimitInfo | null,
   isLoading: boolean,
@@ -326,7 +331,7 @@ function rateLimitCardSubtitle(
   }
   const window = findRateLimitWindow(info, durationMins);
   return window
-    ? `${formatRateLimitPercent(window.remainingPercent)} remaining (derived) · Reset: ${formatStartedAt(window.resetsAt)}`
+    ? `Used ${formatRateLimitPercent(window.usedPercent)} (Official) · Remaining ${formatRateLimitPercent(window.remainingPercent)} (Derived) · Reset: ${formatStartedAt(window.resetsAt)}`
     : "Official window not reported";
 }
 
@@ -610,6 +615,10 @@ export default function DashboardPage() {
     }
   }, []);
 
+  const refreshDashboardData = useCallback(async () => {
+    await Promise.allSettled([loadAccount(true), loadRateLimits(true), loadUsage(true)]);
+  }, [loadAccount, loadRateLimits, loadUsage]);
+
   const handleStartAppServer = useCallback(async () => {
     setAppServerAction("start");
     setAppServerError(null);
@@ -808,22 +817,6 @@ export default function DashboardPage() {
   const missingOptionalCapabilities =
     compatibilityInfo?.checks.filter((check) => !check.required && !check.present) ?? [];
   const compatibilityMessage = compatibilityError ?? compatibilityInfo?.message;
-  const codexCardValue = isCodexLoading
-    ? "Detecting…"
-    : codexError
-      ? "Error"
-      : codexInfo?.installed
-        ? "Installed"
-        : codexInfo?.status === "notFound"
-          ? "Not found"
-          : "Unavailable";
-  const codexCardSubtitle = isCodexLoading
-    ? "Checking local CLI"
-    : codexError
-      ? codexError
-      : codexInfo?.version
-        ? `Version ${codexInfo.version}`
-        : codexInfo?.message ?? "Version unavailable";
   const codexStatusVariant = isCodexLoading
     ? "warning"
     : codexError
@@ -896,9 +889,22 @@ export default function DashboardPage() {
           <p className="page-subtitle">Local Codex usage monitoring</p>
         </div>
         <div className="page-header__status">
-          <StatusBadge variant={systemReady ? "success" : error ? "error" : "warning"}>
-            {systemReady ? "System Ready" : error ? "System Error" : "Checking system"}
-          </StatusBadge>
+          <div className="page-header__badges">
+            <StatusBadge variant={appServerStatusVariant}>
+              App Server {appServerStatusLabel}
+            </StatusBadge>
+            <StatusBadge variant={accountStatusVariant}>
+              Account {formatPlanType(visibleAccountInfo?.planType ?? null)}
+            </StatusBadge>
+          </div>
+          <button
+            className="button button--secondary button--compact"
+            type="button"
+            onClick={() => void refreshDashboardData()}
+            disabled={!accountReady || isAccountLoading || isRateLimitLoading || isUsageLoading}
+          >
+            {isAccountLoading || isRateLimitLoading || isUsageLoading ? "Refreshing…" : "Refresh Data"}
+          </button>
           {snapshot ? (
             <span className="environment-label">
               v{snapshot.appInfo.version} · {snapshot.appInfo.environment}
@@ -914,30 +920,77 @@ export default function DashboardPage() {
         <div className="section-heading">
           <div>
             <p className="section-kicker">Official App Server data</p>
-            <h2 id="business-status-heading">Usage overview</h2>
+            <h2 id="business-status-heading">Usage Snapshot</h2>
           </div>
           <StatusBadge variant={rateLimitStatusVariant}>{rateLimitStatusLabel}</StatusBadge>
         </div>
         <div className="metric-grid metric-grid--four">
-          <MetricCard title="Codex CLI" value={codexCardValue} subtitle={codexCardSubtitle} />
           <MetricCard
             title="5 Hour Usage"
-            value={rateLimitCardValue(visibleRateLimitInfo, isRateLimitLoading, 300)}
+            value={
+              <>
+                <span>{rateLimitCardValue(visibleRateLimitInfo, isRateLimitLoading, 300)}</span>
+                <span
+                  className="rate-limit-progress"
+                  role="progressbar"
+                  aria-label="5 hour used percent"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={getRateLimitProgressPercent(visibleRateLimitInfo, 300) ?? undefined}
+                >
+                  <span
+                    className="rate-limit-progress__fill"
+                    style={{
+                      width: `${getRateLimitProgressPercent(visibleRateLimitInfo, 300) ?? 0}%`,
+                    }}
+                  />
+                </span>
+              </>
+            }
             subtitle={rateLimitCardSubtitle(visibleRateLimitInfo, isRateLimitLoading, 300)}
           />
           <MetricCard
             title="Weekly Usage"
-            value={rateLimitCardValue(visibleRateLimitInfo, isRateLimitLoading, 10080)}
+            value={
+              <>
+                <span>{rateLimitCardValue(visibleRateLimitInfo, isRateLimitLoading, 10080)}</span>
+                <span
+                  className="rate-limit-progress"
+                  role="progressbar"
+                  aria-label="weekly used percent"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={getRateLimitProgressPercent(visibleRateLimitInfo, 10080) ?? undefined}
+                >
+                  <span
+                    className="rate-limit-progress__fill"
+                    style={{
+                      width: `${getRateLimitProgressPercent(visibleRateLimitInfo, 10080) ?? 0}%`,
+                    }}
+                  />
+                </span>
+              </>
+            }
             subtitle={rateLimitCardSubtitle(visibleRateLimitInfo, isRateLimitLoading, 10080)}
           />
           <MetricCard
             title="Today Tokens"
             value={isUsageLoading ? "Checking..." : getTodayTokens(visibleUsageInfo)}
             subtitle="Official daily bucket · local date"
+            label="Official"
+          />
+          <MetricCard
+            title="API Equivalent Cost"
+            value="Unavailable"
+            subtitle="Waiting for model/token breakdown"
+            label="Derived"
           />
         </div>
       </section>
 
+      <details className="diagnostics-panel">
+        <summary>Diagnostics</summary>
+        <div className="diagnostics-panel__content">
       <section className="section-block" aria-labelledby="codex-environment-heading">
         <div className="section-heading">
           <div>
@@ -1171,6 +1224,9 @@ export default function DashboardPage() {
         {appServerMessage ? <p className="codex-message">{appServerMessage}</p> : null}
       </section>
 
+        </div>
+      </details>
+
       <section className="section-block" aria-labelledby="codex-account-heading">
         <div className="section-heading">
           <div>
@@ -1235,8 +1291,8 @@ export default function DashboardPage() {
       <section className="section-block" aria-labelledby="codex-rate-limits-heading">
         <div className="section-heading">
           <div>
-            <p className="section-kicker">Official rate-limit windows</p>
-            <h2 id="codex-rate-limits-heading">Rate Limits</h2>
+            <p className="section-kicker">All official rate-limit windows</p>
+            <h2 id="codex-rate-limits-heading">Rate Limit Details</h2>
           </div>
           <div className="section-heading__actions">
             <StatusBadge variant={rateLimitStatusVariant}>{rateLimitStatusLabel}</StatusBadge>
@@ -1276,24 +1332,27 @@ export default function DashboardPage() {
                   <strong>{window.limitName ?? window.limitId ?? "--"}</strong>
                 </div>
                 <div>
-                  <span>Window</span>
+                  <span>Window Duration</span>
                   <strong>
-                    {window.windowKind === "primary" ? "Primary" : "Secondary"} ·{" "}
                     {window.windowDurationMins === null
                       ? "Not reported"
                       : `${window.windowDurationMins} min`}
                   </strong>
                 </div>
                 <div>
-                  <span>Used</span>
+                  <span>Kind</span>
+                  <strong>{window.windowKind === "primary" ? "Primary" : "Secondary"}</strong>
+                </div>
+                <div>
+                  <span>Used · Official</span>
                   <strong>{formatRateLimitPercent(window.usedPercent)}</strong>
                 </div>
                 <div>
-                  <span>Remaining (derived)</span>
+                  <span>Remaining · Derived</span>
                   <strong>{formatRateLimitPercent(window.remainingPercent)}</strong>
                 </div>
                 <div>
-                  <span>Reset Time</span>
+                  <span>Reset</span>
                   <strong>{formatStartedAt(window.resetsAt)}</strong>
                 </div>
                 <div>
@@ -1319,7 +1378,7 @@ export default function DashboardPage() {
         <div className="section-heading">
           <div>
             <p className="section-kicker">Official token activity</p>
-            <h2 id="codex-usage-heading">Usage Details</h2>
+            <h2 id="codex-usage-heading">Usage Overview</h2>
           </div>
           <div className="section-heading__actions">
             <StatusBadge variant={usageStatusVariant}>{usageStatusLabel}</StatusBadge>
@@ -1343,15 +1402,6 @@ export default function DashboardPage() {
             <strong>{formatUsageNumber(visibleUsageInfo?.summary?.peakDailyTokens)}</strong>
           </div>
           <div className="codex-row">
-            <span>Longest Running Turn</span>
-            <strong>
-              {visibleUsageInfo?.summary?.longestRunningTurnSec === null ||
-              visibleUsageInfo?.summary?.longestRunningTurnSec === undefined
-                ? "--"
-                : `${formatUsageNumber(visibleUsageInfo.summary.longestRunningTurnSec)} sec`}
-            </strong>
-          </div>
-          <div className="codex-row">
             <span>Current Streak</span>
             <strong>
               {visibleUsageInfo?.summary?.currentStreakDays === null ||
@@ -1367,6 +1417,15 @@ export default function DashboardPage() {
               visibleUsageInfo?.summary?.longestStreakDays === undefined
                 ? "--"
                 : `${formatUsageNumber(visibleUsageInfo.summary.longestStreakDays)} days`}
+            </strong>
+          </div>
+          <div className="codex-row">
+            <span>Longest Running Turn</span>
+            <strong>
+              {visibleUsageInfo?.summary?.longestRunningTurnSec === null ||
+              visibleUsageInfo?.summary?.longestRunningTurnSec === undefined
+                ? "--"
+                : `${formatUsageNumber(visibleUsageInfo.summary.longestRunningTurnSec)} sec`}
             </strong>
           </div>
         </div>
