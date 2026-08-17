@@ -5,6 +5,11 @@ import { LoadingState } from "../../components/common/LoadingState";
 import { StatusBadge, type StatusVariant } from "../../components/common/StatusBadge";
 import { MetricCard } from "../../components/dashboard/MetricCard";
 import {
+  getCountdownState,
+  shouldAutoRefreshReset,
+  useCountdown,
+} from "../../hooks/useCountdown";
+import {
   detectCodexEnvironment,
   checkCodexSchemaCompatibility,
   getAppInfo,
@@ -325,13 +330,14 @@ function rateLimitCardSubtitle(
   info: RateLimitInfo | null,
   isLoading: boolean,
   durationMins: number,
+  resetIn: string,
 ): string {
   if (isLoading) {
     return "Reading official App Server data";
   }
   const window = findRateLimitWindow(info, durationMins);
   return window
-    ? `Used ${formatRateLimitPercent(window.usedPercent)} (Official) · Remaining ${formatRateLimitPercent(window.remainingPercent)} (Derived) · Reset: ${formatStartedAt(window.resetsAt)}`
+    ? `Used ${formatRateLimitPercent(window.usedPercent)} (Official) · Remaining ${formatRateLimitPercent(window.remainingPercent)} (Derived) · Reset in ${resetIn} · Reset at ${formatStartedAt(window.resetsAt)}`
     : "Official window not reported";
 }
 
@@ -508,6 +514,9 @@ export default function DashboardPage() {
   const hasLoadedAccountRef = useRef(false);
   const hasLoadedRateLimitRef = useRef(false);
   const hasLoadedUsageRef = useRef(false);
+  const [nowSeconds, setNowSeconds] = useState(() => Math.floor(Date.now() / 1000));
+  const lastAutoRefreshedResetAt = useRef(new Set<number>());
+  const [countdownRefreshError, setCountdownRefreshError] = useState<string | null>(null);
 
   const loadSystemStatus = useCallback(async () => {
     setIsLoading(true);
@@ -592,10 +601,16 @@ export default function DashboardPage() {
     setRateLimitError(null);
 
     try {
-      setRateLimitInfo(await getCodexRateLimits(force));
+      const nextInfo = await getCodexRateLimits(force);
+      setRateLimitInfo(nextInfo);
+      if (force && nextInfo.status !== "error") {
+        setCountdownRefreshError(null);
+      }
+      return nextInfo.status !== "error";
     } catch (loadError: unknown) {
       setRateLimitInfo(null);
       setRateLimitError(getErrorMessage(loadError));
+      return false;
     } finally {
       setIsRateLimitLoading(false);
     }
@@ -660,6 +675,14 @@ export default function DashboardPage() {
   }, [loadAppServerStatus, loadCodexEnvironment, loadSystemStatus]);
 
   useEffect(() => {
+    const intervalId = window.setInterval(() => {
+      setNowSeconds(Math.floor(Date.now() / 1000));
+    }, 1000);
+
+    return () => window.clearInterval(intervalId);
+  }, []);
+
+  useEffect(() => {
     if (!appServerInfo || !isActiveAppServerStatus(appServerInfo.status)) {
       return;
     }
@@ -701,6 +724,8 @@ export default function DashboardPage() {
       hasLoadedRateLimitRef.current = false;
       setRateLimitInfo(null);
       setRateLimitError(null);
+      setCountdownRefreshError(null);
+      lastAutoRefreshedResetAt.current.clear();
       return;
     }
 
@@ -853,6 +878,43 @@ export default function DashboardPage() {
     ? accountError ?? visibleAccountInfo?.message
     : "Start the Codex App Server to read account information.";
   const visibleRateLimitInfo = accountReady ? rateLimitInfo : null;
+  const fiveHourCountdown = useCountdown(
+    findRateLimitWindow(visibleRateLimitInfo, 300)?.resetsAt ?? null,
+    nowSeconds,
+  );
+  const weeklyCountdown = useCountdown(
+    findRateLimitWindow(visibleRateLimitInfo, 10080)?.resetsAt ?? null,
+    nowSeconds,
+  );
+  useEffect(() => {
+    if (!accountReady || !visibleRateLimitInfo) {
+      return;
+    }
+
+    const resetTimestampsToRefresh = new Set<number>();
+    for (const window of visibleRateLimitInfo.windows) {
+      if (
+        window.resetsAt !== null &&
+        shouldAutoRefreshReset(window.resetsAt, nowSeconds, lastAutoRefreshedResetAt.current)
+      ) {
+        resetTimestampsToRefresh.add(window.resetsAt);
+      }
+    }
+
+    if (resetTimestampsToRefresh.size === 0) {
+      return;
+    }
+
+    for (const resetAt of resetTimestampsToRefresh) {
+      lastAutoRefreshedResetAt.current.add(resetAt);
+    }
+
+    void loadRateLimits(true).then((succeeded) => {
+      if (!succeeded) {
+        setCountdownRefreshError("Reset reached · refresh failed");
+      }
+    });
+  }, [accountReady, loadRateLimits, nowSeconds, visibleRateLimitInfo]);
   const rateLimitStatus = accountReady
     ? visibleRateLimitInfo?.status ?? (rateLimitError ? "error" : null)
     : "unavailable";
@@ -867,7 +929,7 @@ export default function DashboardPage() {
     rateLimitError,
   );
   const rateLimitMessage = accountReady
-    ? rateLimitError ?? visibleRateLimitInfo?.message
+    ? countdownRefreshError ?? rateLimitError ?? visibleRateLimitInfo?.message
     : "Start the Codex App Server to read rate limits.";
   const visibleUsageInfo = accountReady ? usageInfo : null;
   const usageStatus = accountReady
@@ -947,7 +1009,12 @@ export default function DashboardPage() {
                 </span>
               </>
             }
-            subtitle={rateLimitCardSubtitle(visibleRateLimitInfo, isRateLimitLoading, 300)}
+            subtitle={rateLimitCardSubtitle(
+              visibleRateLimitInfo,
+              isRateLimitLoading,
+              300,
+              fiveHourCountdown.displayText,
+            )}
           />
           <MetricCard
             title="Weekly Usage"
@@ -971,7 +1038,12 @@ export default function DashboardPage() {
                 </span>
               </>
             }
-            subtitle={rateLimitCardSubtitle(visibleRateLimitInfo, isRateLimitLoading, 10080)}
+            subtitle={rateLimitCardSubtitle(
+              visibleRateLimitInfo,
+              isRateLimitLoading,
+              10080,
+              weeklyCountdown.displayText,
+            )}
           />
           <MetricCard
             title="Today Tokens"
@@ -1354,6 +1426,10 @@ export default function DashboardPage() {
                 <div>
                   <span>Reset</span>
                   <strong>{formatStartedAt(window.resetsAt)}</strong>
+                </div>
+                <div>
+                  <span>Reset In</span>
+                  <strong>{getCountdownState(window.resetsAt, nowSeconds).displayText}</strong>
                 </div>
                 <div>
                   <span>Plan</span>
