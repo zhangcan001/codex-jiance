@@ -393,7 +393,7 @@ impl ThreadUsageRepository {
                  SELECT observed_at, id, delta_total_tokens, delta_input_tokens,
                         delta_cached_input_tokens, delta_cache_write_input_tokens,
                         delta_output_tokens, delta_reasoning_output_tokens,
-                        project_key, model_id
+                 project_key, model_id
                  FROM thread_token_snapshots
                  WHERE delta_total_tokens IS NOT NULL
                    AND (? IS NULL OR observed_at >= ?)

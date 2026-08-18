@@ -1,11 +1,8 @@
 use std::sync::Arc;
 
 use crate::{
-    error::AppError,
-    model_usage::ModelUsageService,
+    desktop::DesktopRepository, error::AppError, model_usage::ModelUsageService,
     project::ProjectService,
-    rate_limit::RateLimitRepository,
-    thread_usage::{ThreadUsageRepository, TokenHistoryPoint},
 };
 
 use super::model::{
@@ -14,25 +11,22 @@ use super::model::{
 };
 
 const MAX_HISTORY_POINTS: usize = 2_000;
-const COVERAGE: &str = "Current App Server connection";
+const COVERAGE: &str = "Codex Desktop local rollouts";
 
 pub(crate) struct HistoryService {
-    rate_limit_repository: Arc<RateLimitRepository>,
-    thread_usage_repository: Arc<ThreadUsageRepository>,
+    rate_limit_repository: Arc<DesktopRepository>,
     project_service: Arc<ProjectService>,
     model_usage_service: Arc<ModelUsageService>,
 }
 
 impl HistoryService {
     pub(crate) fn new(
-        rate_limit_repository: Arc<RateLimitRepository>,
-        thread_usage_repository: Arc<ThreadUsageRepository>,
+        rate_limit_repository: Arc<DesktopRepository>,
         project_service: Arc<ProjectService>,
         model_usage_service: Arc<ModelUsageService>,
     ) -> Self {
         Self {
             rate_limit_repository,
-            thread_usage_repository,
             project_service,
             model_usage_service,
         }
@@ -58,14 +52,14 @@ impl HistoryService {
             })
             .collect();
         let token_series = self
-            .thread_usage_repository
+            .rate_limit_repository
             .history_points(start_at, end_at, MAX_HISTORY_POINTS)
             .await?
             .into_iter()
             .map(public_token_point)
             .collect();
         let coverage_counts = self
-            .thread_usage_repository
+            .rate_limit_repository
             .history_coverage(start_at, end_at)
             .await?;
         let projects = self.project_service.get_usage(start_at, end_at).await?;
@@ -91,7 +85,7 @@ impl HistoryService {
     }
 }
 
-fn public_token_point(point: TokenHistoryPoint) -> PublicTokenHistoryPoint {
+fn public_token_point(point: crate::desktop::DesktopTokenHistoryPoint) -> PublicTokenHistoryPoint {
     PublicTokenHistoryPoint {
         observed_at: point.observed_at,
         delta_total_tokens: point.delta_total_tokens,

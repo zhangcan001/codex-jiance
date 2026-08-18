@@ -7,10 +7,11 @@ use tauri::AppHandle;
 use tauri_plugin_notification::{NotificationExt, PermissionState};
 
 use crate::{
-    account::unix_timestamp,
+    desktop::DesktopRateLimitService,
     prediction::{QuotaPrediction, QuotaPredictionOutcome, QuotaPredictionService},
-    rate_limit::{RateLimitInfo, RateLimitService, RateLimitWindow, RateLimitWindowKind},
+    rate_limit::{RateLimitInfo, RateLimitWindow, RateLimitWindowKind},
     settings::{AppSettings, SettingsService},
+    time::unix_timestamp,
 };
 
 use super::model::{AlertServiceStatus, QuotaAlert, QuotaAlertSeverity, QuotaAlertType};
@@ -116,7 +117,7 @@ impl AlertStore {
 }
 
 pub(crate) struct AlertService {
-    rate_limit_service: Arc<RateLimitService>,
+    rate_limit_service: Arc<DesktopRateLimitService>,
     prediction_service: Arc<QuotaPredictionService>,
     settings_service: Arc<SettingsService>,
     notifier: Arc<dyn AlertNotifier>,
@@ -128,7 +129,7 @@ pub(crate) struct AlertService {
 impl AlertService {
     pub(crate) fn new(
         app: AppHandle,
-        rate_limit_service: Arc<RateLimitService>,
+        rate_limit_service: Arc<DesktopRateLimitService>,
         prediction_service: Arc<QuotaPredictionService>,
         settings_service: Arc<SettingsService>,
     ) -> Arc<Self> {
@@ -141,7 +142,7 @@ impl AlertService {
     }
 
     fn with_notifier(
-        rate_limit_service: Arc<RateLimitService>,
+        rate_limit_service: Arc<DesktopRateLimitService>,
         prediction_service: Arc<QuotaPredictionService>,
         notifier: Arc<dyn AlertNotifier>,
         settings_service: Arc<SettingsService>,

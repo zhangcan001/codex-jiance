@@ -27,45 +27,58 @@ pub enum AppError {
     #[error("Process timed out: {0}")]
     ProcessTimeout(String),
 
+    #[cfg(test)]
     #[error("Codex detection error: {0}")]
     CodexDetection(String),
 
+    #[cfg(test)]
     #[error("Codex CLI was not found: {0}")]
     CodexNotFound(String),
 
+    #[cfg(test)]
     #[error("App Server is unavailable: {0}")]
     AppServerUnavailable(String),
 
+    #[cfg(test)]
     #[error("App Server start failed: {0}")]
     AppServerStart(String),
 
+    #[cfg(test)]
     #[error("App Server initialization failed: {0}")]
     AppServerInitialization(String),
 
+    #[cfg(test)]
     #[error("Schema compatibility error: {0}")]
     SchemaCompatibility(String),
 
+    #[cfg(test)]
     #[error("Schema generation is unavailable: {0}")]
     SchemaGenerationUnavailable(String),
 
+    #[cfg(test)]
     #[error("Account service error: {0}")]
     AccountService(String),
 
     #[error("Settings error: {0}")]
     Settings(String),
 
+    #[cfg(test)]
     #[error("App Server stop failed: {0}")]
     AppServerStop(String),
 
+    #[cfg(test)]
     #[error("RPC remote error: {0}")]
     RpcRemote(String),
 
+    #[cfg(test)]
     #[error("RPC disconnected: {0}")]
     RpcDisconnected(String),
 
+    #[cfg(test)]
     #[error("RPC protocol error: {0}")]
     RpcProtocol(String),
 
+    #[cfg(test)]
     #[error("RPC request timed out: {0}")]
     RpcTimeout(String),
 
@@ -121,34 +134,42 @@ impl From<AppError> for CommandError {
                 code: "PROCESS_TIMEOUT".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::CodexDetection(message) => Self {
                 code: "CODEX_DETECTION_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::CodexNotFound(message) => Self {
                 code: "CODEX_NOT_FOUND".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::AppServerUnavailable(message) => Self {
                 code: "APP_SERVER_UNAVAILABLE".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::AppServerStart(message) => Self {
                 code: "APP_SERVER_START_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::AppServerInitialization(message) => Self {
                 code: "APP_SERVER_INITIALIZATION_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::SchemaCompatibility(message) => Self {
                 code: "SCHEMA_COMPATIBILITY_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::SchemaGenerationUnavailable(message) => Self {
                 code: "SCHEMA_GENERATION_UNAVAILABLE".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::AccountService(message) => Self {
                 code: "ACCOUNT_SERVICE_ERROR".to_owned(),
                 message,
@@ -157,22 +178,27 @@ impl From<AppError> for CommandError {
                 code: "SETTINGS_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::AppServerStop(message) => Self {
                 code: "APP_SERVER_STOP_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::RpcRemote(message) => Self {
                 code: "RPC_REMOTE_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::RpcDisconnected(message) => Self {
                 code: "RPC_DISCONNECTED".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::RpcProtocol(message) => Self {
                 code: "RPC_PROTOCOL_ERROR".to_owned(),
                 message,
             },
+            #[cfg(test)]
             AppError::RpcTimeout(message) => Self {
                 code: "RPC_TIMEOUT".to_owned(),
                 message,

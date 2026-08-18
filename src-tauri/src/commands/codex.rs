@@ -1,61 +1,46 @@
 use crate::{
-    account::CodexAccountInfo,
     alerts::AlertServiceStatus,
     burn_rate::BurnRateEstimate,
-    codex,
+    desktop::{
+        DesktopEnvironmentInfo, DesktopMonitorStatus, DesktopThreadUsageInfo, DesktopUsageActivity,
+    },
     error::CommandResult,
     history::MonitoringHistory,
     model_usage::ModelUsageReport,
-    models::codex::{AppServerStatusInfo, CodexInstallationInfo, SchemaCompatibilityReport},
     prediction::QuotaPrediction,
     project::ProjectUsageReport,
     rate_limit::RateLimitInfo,
     state::AppState,
-    thread_usage::ThreadUsageInfo,
     usage::CodexUsageInfo,
 };
 use tauri::State;
 
 #[tauri::command]
-pub async fn detect_codex_environment() -> CommandResult<CodexInstallationInfo> {
-    codex::detect().await.map_err(Into::into)
+pub async fn get_desktop_environment(
+    state: State<'_, AppState>,
+) -> CommandResult<DesktopEnvironmentInfo> {
+    Ok(state.desktop_service.environment().await)
 }
 
 #[tauri::command]
-pub async fn start_codex_app_server(
+pub async fn get_desktop_monitor_status(
     state: State<'_, AppState>,
-) -> CommandResult<AppServerStatusInfo> {
-    state.app_server_manager.start().await.map_err(Into::into)
+) -> CommandResult<DesktopMonitorStatus> {
+    Ok(state.desktop_service.status().await)
 }
 
 #[tauri::command]
-pub async fn stop_codex_app_server(
+pub async fn refresh_desktop_index(
     state: State<'_, AppState>,
-) -> CommandResult<AppServerStatusInfo> {
-    state.app_server_manager.stop().await.map_err(Into::into)
+) -> CommandResult<DesktopMonitorStatus> {
+    state.desktop_service.refresh().await.map_err(Into::into)
 }
 
 #[tauri::command]
-pub async fn get_codex_app_server_status(
+pub async fn get_desktop_activity(
     state: State<'_, AppState>,
-) -> CommandResult<AppServerStatusInfo> {
-    state.app_server_manager.status().await.map_err(Into::into)
-}
-
-#[tauri::command]
-pub async fn check_codex_schema_compatibility(
-    state: State<'_, AppState>,
-    force: bool,
-) -> CommandResult<SchemaCompatibilityReport> {
-    Ok(state.schema_compatibility_service.check(force).await)
-}
-
-#[tauri::command]
-pub async fn get_codex_account(
-    state: State<'_, AppState>,
-    force: bool,
-) -> CommandResult<CodexAccountInfo> {
-    Ok(state.account_service.get_account(force).await)
+) -> CommandResult<DesktopUsageActivity> {
+    state.desktop_service.activity().await.map_err(Into::into)
 }
 
 #[tauri::command]
@@ -97,17 +82,17 @@ pub async fn request_alert_notification_permission(
 #[tauri::command]
 pub async fn get_codex_usage(
     state: State<'_, AppState>,
-    force: bool,
+    _force: bool,
 ) -> CommandResult<CodexUsageInfo> {
-    Ok(state.usage_service.get_usage(force).await)
+    Ok(state.desktop_service.usage().await)
 }
 
 #[tauri::command]
 pub async fn get_thread_usage_status(
     state: State<'_, AppState>,
-    force_inventory: bool,
-) -> CommandResult<ThreadUsageInfo> {
-    Ok(state.thread_usage_service.get_status(force_inventory).await)
+    _force_inventory: bool,
+) -> CommandResult<DesktopThreadUsageInfo> {
+    Ok(state.desktop_service.thread_usage().await)
 }
 
 #[tauri::command]

@@ -3,12 +3,12 @@ use std::{
     sync::Arc,
 };
 
-use sqlx::Row;
+use sqlx::{Column, Row};
 
 use crate::{
+    desktop::DesktopRepository,
     error::AppError,
     pricing::{calculate_api_equivalent_cost, TokenCostInput},
-    thread_usage::ThreadUsageRepository,
 };
 
 use super::model::{ProjectUsageAggregate, ProjectUsageReport};
@@ -17,11 +17,11 @@ const MAX_PROJECTS: usize = 100;
 const DERIVED_TRUST: &str = "derived";
 
 pub(crate) struct ProjectService {
-    repository: Arc<ThreadUsageRepository>,
+    repository: Arc<DesktopRepository>,
 }
 
 impl ProjectService {
-    pub(crate) fn new(repository: Arc<ThreadUsageRepository>) -> Self {
+    pub(crate) fn new(repository: Arc<DesktopRepository>) -> Self {
         Self { repository }
     }
 
@@ -34,9 +34,9 @@ impl ProjectService {
             "SELECT project_key, project_name, thread_id, model_id, observed_at,
                     delta_total_tokens, delta_input_tokens, delta_cached_input_tokens,
                     delta_cache_write_input_tokens, delta_output_tokens,
-                    delta_reasoning_output_tokens
+                    delta_reasoning_output_tokens, cache_write_telemetry_present
              FROM thread_token_snapshots
-             WHERE delta_total_tokens IS NOT NULL
+             WHERE source='desktop_rollout' AND delta_total_tokens IS NOT NULL
                AND (? IS NULL OR observed_at >= ?)
                AND (? IS NULL OR observed_at < ?)
              ORDER BY observed_at ASC, id ASC",
@@ -159,18 +159,31 @@ impl AggregateBuilder {
         self.output_tokens = self.output_tokens.saturating_add(output);
         self.reasoning_output_tokens = self.reasoning_output_tokens.saturating_add(reasoning);
         let model_id: Option<String> = row.try_get("model_id")?;
-        if let Some(model) = model_id {
-            let uncached = valid_uncached_input(input, cached, cache_write);
-            if let Some(uncached) = uncached {
-                if let Ok(cost) = calculate_api_equivalent_cost(TokenCostInput {
-                    model,
-                    uncached_input_tokens: uncached,
-                    cached_input_tokens: cached,
-                    cache_write_input_tokens: cache_write,
-                    output_tokens: output,
-                }) {
-                    self.cost += cost.total_usd;
-                    self.priced_event_count += 1;
+        let has_cache_write_flag = row
+            .columns()
+            .iter()
+            .any(|column| column.name() == "cache_write_telemetry_present");
+        let cache_write_complete = !has_cache_write_flag
+            || row
+                .try_get::<i64, _>("cache_write_telemetry_present")
+                .unwrap_or(1)
+                != 0;
+        if cache_write_complete {
+            if let Some(model) = model_id {
+                let uncached = valid_uncached_input(input, cached, cache_write);
+                if let Some(uncached) = uncached {
+                    if let Ok(cost) = calculate_api_equivalent_cost(TokenCostInput {
+                        model,
+                        uncached_input_tokens: uncached,
+                        cached_input_tokens: cached,
+                        cache_write_input_tokens: cache_write,
+                        output_tokens: output,
+                    }) {
+                        self.cost += cost.total_usd;
+                        self.priced_event_count += 1;
+                    } else {
+                        self.unpriced_event_count += 1;
+                    }
                 } else {
                     self.unpriced_event_count += 1;
                 }

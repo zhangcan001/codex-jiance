@@ -3,12 +3,12 @@ use std::{
     sync::Arc,
 };
 
-use sqlx::Row;
+use sqlx::{Column, Row};
 
 use crate::{
+    desktop::DesktopRepository,
     error::AppError,
     pricing::{calculate_api_equivalent_cost, TokenCostInput},
-    thread_usage::ThreadUsageRepository,
 };
 
 use super::model::{ModelUsageAggregate, ModelUsageReport};
@@ -17,11 +17,11 @@ const MAX_MODELS: usize = 100;
 const DERIVED_TRUST: &str = "derived";
 
 pub(crate) struct ModelUsageService {
-    repository: Arc<ThreadUsageRepository>,
+    repository: Arc<DesktopRepository>,
 }
 
 impl ModelUsageService {
-    pub(crate) fn new(repository: Arc<ThreadUsageRepository>) -> Self {
+    pub(crate) fn new(repository: Arc<DesktopRepository>) -> Self {
         Self { repository }
     }
 
@@ -34,9 +34,9 @@ impl ModelUsageService {
             "SELECT model_id, model_source, thread_id, observed_at,
                     delta_total_tokens, delta_input_tokens, delta_cached_input_tokens,
                     delta_cache_write_input_tokens, delta_output_tokens,
-                    delta_reasoning_output_tokens
+                    delta_reasoning_output_tokens, cache_write_telemetry_present
              FROM thread_token_snapshots
-             WHERE delta_total_tokens IS NOT NULL
+             WHERE source='desktop_rollout' AND delta_total_tokens IS NOT NULL
                AND (? IS NULL OR observed_at >= ?)
                AND (? IS NULL OR observed_at < ?)
              ORDER BY observed_at ASC, id ASC",
@@ -158,7 +158,18 @@ impl AggregateBuilder {
             row.try_get("delta_reasoning_output_tokens")?,
             "delta reasoning output tokens",
         )?;
-        let uncached = valid_uncached_input(input, cached, cache_write);
+        let has_cache_write_flag = row
+            .columns()
+            .iter()
+            .any(|column| column.name() == "cache_write_telemetry_present");
+        let cache_write_complete = !has_cache_write_flag
+            || row
+                .try_get::<i64, _>("cache_write_telemetry_present")
+                .unwrap_or(1)
+                != 0;
+        let uncached = cache_write_complete
+            .then(|| valid_uncached_input(input, cached, cache_write))
+            .flatten();
         self.total_tokens = self.total_tokens.saturating_add(total);
         self.input_tokens = self.input_tokens.saturating_add(input);
         self.cached_input_tokens = self.cached_input_tokens.saturating_add(cached);

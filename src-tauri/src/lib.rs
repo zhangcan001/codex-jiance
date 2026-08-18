@@ -1,9 +1,12 @@
+#[cfg(test)]
 mod account;
 mod alerts;
 mod burn_rate;
+#[cfg(test)]
 mod codex;
 mod commands;
 mod database;
+mod desktop;
 mod error;
 mod history;
 mod model_usage;
@@ -14,7 +17,9 @@ mod project;
 mod rate_limit;
 mod settings;
 mod state;
+#[cfg(test)]
 mod thread_usage;
+mod time;
 mod tray;
 mod usage;
 
@@ -63,6 +68,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 settings_service,
             ));
             app.state::<AppState>().alert_service.start();
+            app.state::<AppState>().desktop_service.start();
             tray::setup(app)?;
             log::info!("Application ready");
             Ok(())
@@ -73,12 +79,10 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::database::database_status,
             commands::settings::get_app_settings,
             commands::settings::update_app_settings,
-            commands::codex::detect_codex_environment,
-            commands::codex::start_codex_app_server,
-            commands::codex::stop_codex_app_server,
-            commands::codex::get_codex_app_server_status,
-            commands::codex::check_codex_schema_compatibility,
-            commands::codex::get_codex_account,
+            commands::codex::get_desktop_environment,
+            commands::codex::get_desktop_monitor_status,
+            commands::codex::refresh_desktop_index,
+            commands::codex::get_desktop_activity,
             commands::codex::get_codex_rate_limits,
             commands::codex::get_codex_burn_rates,
             commands::codex::get_codex_quota_predictions,
@@ -111,19 +115,11 @@ pub fn run() -> Result<(), tauri::Error> {
 
     app.run(|app_handle, event| {
         if let tauri::RunEvent::Exit = event {
-            log::info!(
-                "Application exit received; cleaning up Usage, Rate Limit, Account, and App Server"
-            );
+            log::info!("Application exit received; cleaning up Desktop monitoring services");
             let state = app_handle.state::<AppState>();
             tauri::async_runtime::block_on(state.alert_service.shutdown());
-            tauri::async_runtime::block_on(state.thread_usage_service.shutdown());
-            tauri::async_runtime::block_on(state.usage_service.shutdown());
+            tauri::async_runtime::block_on(state.desktop_service.shutdown());
             tauri::async_runtime::block_on(state.rate_limit_service.shutdown());
-            tauri::async_runtime::block_on(state.account_service.shutdown());
-            if let Err(error) = tauri::async_runtime::block_on(state.app_server_manager.shutdown())
-            {
-                log::error!("App Server cleanup on application exit failed: {error}");
-            }
         }
     });
 

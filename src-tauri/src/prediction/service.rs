@@ -1,9 +1,10 @@
 use std::sync::Arc;
 
 use crate::{
-    account::unix_timestamp,
     burn_rate::{BurnRateEstimate, BurnRateService, BurnRateStatus},
-    rate_limit::{RateLimitService, RateLimitStatus, RateLimitWindow},
+    desktop::DesktopRateLimitService,
+    rate_limit::{RateLimitStatus, RateLimitWindow},
+    time::unix_timestamp,
 };
 
 use super::model::{PredictionConfidence, QuotaPrediction, QuotaPredictionOutcome};
@@ -12,13 +13,13 @@ const ESTIMATED_TRUST: &str = "estimated";
 const STABLE_BURN_RATE: f64 = 0.01;
 
 pub(crate) struct QuotaPredictionService {
-    rate_limit_service: Arc<RateLimitService>,
+    rate_limit_service: Arc<DesktopRateLimitService>,
     burn_rate_service: Arc<BurnRateService>,
 }
 
 impl QuotaPredictionService {
     pub(crate) fn new(
-        rate_limit_service: Arc<RateLimitService>,
+        rate_limit_service: Arc<DesktopRateLimitService>,
         burn_rate_service: Arc<BurnRateService>,
     ) -> Self {
         Self {

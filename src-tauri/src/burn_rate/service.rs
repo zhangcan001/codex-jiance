@@ -1,7 +1,8 @@
 use std::sync::Arc;
 
-use crate::rate_limit::{
-    RateLimitHistorySample, RateLimitRepository, RateLimitService, RateLimitStatus, RateLimitWindow,
+use crate::{
+    desktop::{DesktopRateLimitService, DesktopRepository},
+    rate_limit::{RateLimitHistorySample, RateLimitStatus, RateLimitWindow},
 };
 
 use super::model::{BurnRateEstimate, BurnRateStatus};
@@ -11,14 +12,14 @@ const MIN_OBSERVED_SPAN_SEC: i64 = 60;
 const ESTIMATED_TRUST: &str = "estimated";
 
 pub(crate) struct BurnRateService {
-    rate_limit_service: Arc<RateLimitService>,
-    repository: Arc<RateLimitRepository>,
+    rate_limit_service: Arc<DesktopRateLimitService>,
+    repository: Arc<DesktopRepository>,
 }
 
 impl BurnRateService {
     pub(crate) fn new(
-        rate_limit_service: Arc<RateLimitService>,
-        repository: Arc<RateLimitRepository>,
+        rate_limit_service: Arc<DesktopRateLimitService>,
+        repository: Arc<DesktopRepository>,
     ) -> Self {
         Self {
             rate_limit_service,

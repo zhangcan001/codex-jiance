@@ -1,6 +1,7 @@
 mod model;
+#[cfg(test)]
 mod service;
+#[cfg(test)]
 mod wire;
 
-pub(crate) use model::CodexUsageInfo;
-pub(crate) use service::UsageService;
+pub(crate) use model::{CodexUsageInfo, DailyUsageBucket, UsageStatus, UsageSummary};
