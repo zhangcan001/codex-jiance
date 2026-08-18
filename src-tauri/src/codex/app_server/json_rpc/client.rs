@@ -144,14 +144,13 @@ impl JsonRpcClient {
         self.write_value(message).await
     }
 
-    // Used by DEV-005 notification consumers.
-    #[allow(dead_code)]
+    // Used by account, rate-limit, and thread-usage notification consumers.
     pub fn subscribe_notifications(&self) -> broadcast::Receiver<RpcNotification> {
         self.notification_sender.subscribe()
     }
 
-    // Used by DEV-005 server-request consumers.
-    #[allow(dead_code)]
+    // Kept under test until a production server-request consumer is needed.
+    #[cfg(test)]
     pub fn subscribe_server_requests(&self) -> broadcast::Receiver<RpcServerRequest> {
         self.server_request_sender.subscribe()
     }

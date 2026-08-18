@@ -79,11 +79,15 @@ impl UsageService {
         };
 
         let now = unix_timestamp();
-        let cache = self.cache.read().await;
-        if let Some(current) = &cache.current {
-            if cache_is_usable(force, cache.stale, cache.fetched_at, now) {
-                return current.clone();
-            }
+        let cached = {
+            let cache = self.cache.read().await;
+            cache
+                .current
+                .clone()
+                .filter(|_| cache_is_usable(force, cache.stale, cache.fetched_at, now))
+        };
+        if let Some(current) = cached {
+            return current;
         }
 
         match Self::read_usage_with_client(&client).await {

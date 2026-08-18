@@ -158,10 +158,10 @@ impl AlertService {
     }
 
     pub(crate) fn start(self: &Arc<Self>) {
-        let mut worker = self
-            .worker
-            .lock()
-            .expect("alert worker mutex should not be poisoned");
+        let Ok(mut worker) = self.worker.lock() else {
+            log::error!("Alert worker state is poisoned; alert worker was not started");
+            return;
+        };
         if worker
             .as_ref()
             .is_some_and(|task| !task.inner().is_finished())
@@ -170,43 +170,56 @@ impl AlertService {
         }
         let receiver = self.rate_limit_service.subscribe_updates();
         let service = Arc::clone(self);
-        *self
-            .running
-            .lock()
-            .expect("alert state mutex should not be poisoned") = true;
+        let Ok(mut running) = self.running.lock() else {
+            log::error!("Alert running state is poisoned; alert worker was not started");
+            return;
+        };
+        *running = true;
         *worker = Some(tauri::async_runtime::spawn(async move {
             service.run(receiver).await;
         }));
     }
 
     pub(crate) async fn shutdown(&self) {
-        let task = self
-            .worker
-            .lock()
-            .expect("alert worker mutex should not be poisoned")
-            .take();
+        let task = match self.worker.lock() {
+            Ok(mut worker) => worker.take(),
+            Err(_) => {
+                log::error!("Alert worker state is poisoned during shutdown");
+                None
+            }
+        };
         if let Some(task) = task {
             task.abort();
             let _ = task.await;
         }
-        *self
-            .running
-            .lock()
-            .expect("alert state mutex should not be poisoned") = false;
+        if let Ok(mut running) = self.running.lock() {
+            *running = false;
+        } else {
+            log::error!("Alert running state is poisoned during shutdown");
+        }
     }
 
     async fn run(self: Arc<Self>, mut receiver: tokio::sync::broadcast::Receiver<RateLimitInfo>) {
         loop {
             match receiver.recv().await {
                 Ok(info) => self.process_update(info).await,
-                Err(tokio::sync::broadcast::error::RecvError::Lagged(_)) => continue,
+                Err(tokio::sync::broadcast::error::RecvError::Lagged(skipped)) => {
+                    log::warn!(
+                        "Alert worker lagged by {skipped} rate-limit updates; refreshing once"
+                    );
+                    let refreshed = self.rate_limit_service.get_rate_limits(true).await;
+                    if refreshed.status != crate::rate_limit::RateLimitStatus::Available {
+                        log::warn!("Alert worker lagged refresh failed; waiting for a future official update");
+                    }
+                }
                 Err(tokio::sync::broadcast::error::RecvError::Closed) => break,
             }
         }
-        *self
-            .running
-            .lock()
-            .expect("alert state mutex should not be poisoned") = false;
+        if let Ok(mut running) = self.running.lock() {
+            *running = false;
+        } else {
+            log::error!("Alert running state is poisoned after worker exit");
+        }
     }
 
     async fn process_update(&self, info: RateLimitInfo) {
@@ -216,10 +229,10 @@ impl AlertService {
         let mut pending_notifications = Vec::new();
 
         {
-            let mut store = self
-                .store
-                .lock()
-                .expect("alert store mutex should not be poisoned");
+            let Ok(mut store) = self.store.lock() else {
+                log::error!("Alert store is poisoned; update was ignored");
+                return;
+            };
             for window in &info.windows {
                 let triggers = if settings.usage_threshold_alerts {
                     threshold_triggers(window, &mut store.processed_thresholds, &settings)
@@ -281,11 +294,13 @@ impl AlertService {
                 match self.notifier.notify("Codex Usage Monitor", &alert.message) {
                     Ok(()) => {
                         if let Some(cycle) = deferred_cycle {
-                            self.store
-                                .lock()
-                                .expect("alert store mutex should not be poisoned")
-                                .deferred_predictions
-                                .remove(&cycle);
+                            if let Ok(mut store) = self.store.lock() {
+                                store.deferred_predictions.remove(&cycle);
+                            } else {
+                                log::error!(
+                                    "Alert store is poisoned while clearing deferred alert"
+                                );
+                            }
                         }
                     }
                     Err(error) => {
@@ -301,26 +316,29 @@ impl AlertService {
             .notifier
             .permission_state()
             .unwrap_or(NotificationPermission::Prompt);
-        let store = self
+        let (alert_count, latest_alerts) = self
             .store
             .lock()
-            .expect("alert store mutex should not be poisoned");
+            .map(|store| {
+                (
+                    store.history.len(),
+                    store.history.iter().rev().take(10).cloned().collect(),
+                )
+            })
+            .unwrap_or_else(|_| (0, Vec::new()));
         let active_worker = self
             .worker
             .lock()
-            .expect("alert worker mutex should not be poisoned")
-            .as_ref()
-            .is_some_and(|task| !task.inner().is_finished());
+            .ok()
+            .and_then(|worker| worker.as_ref().map(|task| !task.inner().is_finished()))
+            .unwrap_or(false);
         AlertServiceStatus {
-            running: *self
-                .running
-                .lock()
-                .expect("alert state mutex should not be poisoned"),
+            running: self.running.lock().map(|running| *running).unwrap_or(false),
             notification_permission: permission_name(permission).to_owned(),
             notification_available: permission == NotificationPermission::Granted,
             active_worker,
-            alert_count: store.history.len(),
-            latest_alerts: store.history.iter().rev().take(10).cloned().collect(),
+            alert_count,
+            latest_alerts,
         }
     }
 

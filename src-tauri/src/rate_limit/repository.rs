@@ -187,15 +187,19 @@ impl RateLimitRepository {
     ) -> Result<Vec<RateLimitHistorySample>, AppError> {
         let max_samples = i64::try_from(max_samples.min(64)).unwrap_or(64);
         let rows = sqlx::query(
-            "SELECT s.captured_at, w.used_percent
-             FROM rate_limit_snapshots AS s
-             INNER JOIN rate_limit_windows AS w ON w.snapshot_id = s.id
-             WHERE ((w.limit_id = ? OR (w.limit_id IS NULL AND ? IS NULL))
-                AND w.window_kind = ?
-                AND ((w.window_duration_mins = ?) OR (w.window_duration_mins IS NULL AND ? IS NULL))
-                AND ((w.resets_at = ?) OR (w.resets_at IS NULL AND ? IS NULL)))
-             ORDER BY s.captured_at ASC, s.id ASC, w.id ASC
-             LIMIT ?",
+            "SELECT captured_at, used_percent
+             FROM (
+                 SELECT s.captured_at, w.used_percent, s.id AS snapshot_id, w.id AS window_id
+                 FROM rate_limit_snapshots AS s
+                 INNER JOIN rate_limit_windows AS w ON w.snapshot_id = s.id
+                 WHERE ((w.limit_id = ? OR (w.limit_id IS NULL AND ? IS NULL))
+                    AND w.window_kind = ?
+                    AND ((w.window_duration_mins = ?) OR (w.window_duration_mins IS NULL AND ? IS NULL))
+                    AND ((w.resets_at = ?) OR (w.resets_at IS NULL AND ? IS NULL)))
+                 ORDER BY s.captured_at DESC, s.id DESC, w.id DESC
+                 LIMIT ?
+             )
+             ORDER BY captured_at ASC, snapshot_id ASC, window_id ASC",
         )
         .bind(limit_id)
         .bind(limit_id)
@@ -597,6 +601,45 @@ mod tests {
         assert_eq!(points.len(), 2_000);
         assert_eq!(points.first().unwrap().captured_at, 1);
         assert_eq!(points.last().unwrap().captured_at, 2_000);
+    }
+
+    #[tokio::test]
+    async fn history_for_window_keeps_latest_64_points_in_ascending_order() {
+        let repository = repository().await;
+        for captured_at in 0..100_i64 {
+            let snapshot_id: i64 = sqlx::query_scalar(
+                "INSERT INTO rate_limit_snapshots (captured_at, fingerprint) VALUES (?, ?) RETURNING id",
+            )
+            .bind(captured_at)
+            .bind(format!("same-cycle-{captured_at}"))
+            .fetch_one(&repository.pool)
+            .await
+            .expect("snapshot should insert");
+            sqlx::query(
+                "INSERT INTO rate_limit_windows
+                 (snapshot_id, limit_id, window_kind, used_percent, window_duration_mins, resets_at)
+                 VALUES (?, 'chatgpt', 'primary', ?, 300, 2000)",
+            )
+            .bind(snapshot_id)
+            .bind(captured_at as f64)
+            .execute(&repository.pool)
+            .await
+            .expect("window should insert");
+        }
+
+        let points = repository
+            .history_for_window(
+                Some("chatgpt"),
+                RateLimitWindowKind::Primary,
+                Some(300),
+                Some(2000),
+                100,
+            )
+            .await
+            .expect("history should load");
+        assert_eq!(points.len(), 64);
+        assert_eq!(points.first().unwrap().captured_at, 36);
+        assert_eq!(points.last().unwrap().captured_at, 99);
     }
 
     #[tokio::test]

@@ -74,8 +74,13 @@ impl SettingsService {
     pub(crate) fn snapshot(&self) -> AppSettingsSnapshot {
         self.snapshot
             .read()
-            .expect("settings snapshot lock should not be poisoned")
-            .clone()
+            .map(|snapshot| snapshot.clone())
+            .unwrap_or_else(|_| AppSettingsSnapshot {
+                settings: AppSettings::default(),
+                autostart_registered: None,
+                autostart_available: false,
+                message: Some("Settings state is unavailable; defaults are active.".to_owned()),
+            })
     }
 
     pub(crate) fn close_to_tray(&self) -> bool {
@@ -135,10 +140,11 @@ impl SettingsService {
             autostart_available,
             message,
         };
-        *self
+        let mut snapshot = self
             .snapshot
             .write()
-            .expect("settings snapshot lock should not be poisoned") = next.clone();
+            .map_err(|_| AppError::Settings("Settings state is unavailable.".to_owned()))?;
+        *snapshot = next.clone();
         Ok(next)
     }
 }
