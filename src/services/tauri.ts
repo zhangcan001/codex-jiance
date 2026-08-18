@@ -2,15 +2,14 @@ import { invoke } from "@tauri-apps/api/core";
 
 import type {
   AlertServiceStatus,
-  AppServerStatusInfo,
   BurnRateEstimate,
-  CodexAccountInfo,
-  CodexInstallationInfo,
   CodexUsageInfo,
+  DesktopEnvironmentInfo,
+  DesktopMonitorStatus,
+  DesktopThreadUsageInfo,
+  DesktopUsageActivity,
   RateLimitInfo,
   QuotaPrediction,
-  SchemaCompatibilityReport,
-  ThreadUsageInfo,
   ProjectUsageReport,
   ModelUsageReport,
   MonitoringHistory,
@@ -82,30 +81,20 @@ export function updateAppSettings(settings: AppSettings): Promise<AppSettingsSna
   return invokeCommand<AppSettingsSnapshot>("update_app_settings", { settings });
 }
 
-export function detectCodexEnvironment(): Promise<CodexInstallationInfo> {
-  return invokeCommand<CodexInstallationInfo>("detect_codex_environment");
+export function getDesktopEnvironment(): Promise<DesktopEnvironmentInfo> {
+  return invokeCommand<DesktopEnvironmentInfo>("get_desktop_environment");
 }
 
-export function startCodexAppServer(): Promise<AppServerStatusInfo> {
-  return invokeCommand<AppServerStatusInfo>("start_codex_app_server");
+export function getDesktopMonitorStatus(): Promise<DesktopMonitorStatus> {
+  return invokeCommand<DesktopMonitorStatus>("get_desktop_monitor_status");
 }
 
-export function stopCodexAppServer(): Promise<AppServerStatusInfo> {
-  return invokeCommand<AppServerStatusInfo>("stop_codex_app_server");
+export function refreshDesktopIndex(): Promise<DesktopMonitorStatus> {
+  return invokeCommand<DesktopMonitorStatus>("refresh_desktop_index");
 }
 
-export function getCodexAppServerStatus(): Promise<AppServerStatusInfo> {
-  return invokeCommand<AppServerStatusInfo>("get_codex_app_server_status");
-}
-
-export function checkCodexSchemaCompatibility(
-  force = false,
-): Promise<SchemaCompatibilityReport> {
-  return invokeCommand<SchemaCompatibilityReport>("check_codex_schema_compatibility", { force });
-}
-
-export function getCodexAccount(force = false): Promise<CodexAccountInfo> {
-  return invokeCommand<CodexAccountInfo>("get_codex_account", { force });
+export function getDesktopActivity(): Promise<DesktopUsageActivity> {
+  return invokeCommand<DesktopUsageActivity>("get_desktop_activity");
 }
 
 export function getCodexRateLimits(force = false): Promise<RateLimitInfo> {
@@ -132,8 +121,8 @@ export function getCodexUsage(force = false): Promise<CodexUsageInfo> {
   return invokeCommand<CodexUsageInfo>("get_codex_usage", { force });
 }
 
-export function getThreadUsageStatus(forceInventory = false): Promise<ThreadUsageInfo> {
-  return invokeCommand<ThreadUsageInfo>("get_thread_usage_status", { forceInventory });
+export function getThreadUsageStatus(forceInventory = false): Promise<DesktopThreadUsageInfo> {
+  return invokeCommand<DesktopThreadUsageInfo>("get_thread_usage_status", { forceInventory });
 }
 
 export function getProjectUsage(startAt?: number, endAt?: number): Promise<ProjectUsageReport> {

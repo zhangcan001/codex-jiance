@@ -1,89 +1,62 @@
-export interface CodexInstallationInfo {
-  installed: boolean;
-  status: string;
-  executablePath: string | null;
-  version: string | null;
-  versionRaw: string | null;
-  appServerSupported: boolean;
-  detectionSource: string | null;
-  detectedAt: number;
+export type DesktopDataStatus = "ready" | "indexing" | "unavailable";
+
+export interface DesktopEnvironmentInfo {
+  status: DesktopDataStatus;
+  codexHome: string | null;
+  sessionsPath: string | null;
+  stateDatabasePath: string | null;
+  stateDbCompatible: boolean;
+  desktopDataAvailable: boolean;
+  desktopRunning: boolean | null;
+  desktopProcessPid: number | null;
+  runtimeVersion: string | null;
+  lastActivityAt: number | null;
+  message: string;
+}
+
+export interface DesktopMonitorStatus {
+  environment: DesktopEnvironmentInfo;
+  indexedDesktopSessions: number;
+  trackedRollouts: number;
+  desktopTokenEvents: number;
+  deltaEvents: number;
+  baselineOnlyEvents: number;
+  lastScanAt: number | null;
+  lastDesktopEventAt: number | null;
+  backfillComplete: boolean;
+  backfillTruncated: boolean;
+  backfillIndexed: number;
+  backfillTotal: number;
+  message: string;
+}
+
+export interface DesktopUsageActivity {
+  status: "available" | "unavailable" | "error";
+  observedTokens: number;
+  todayTokens: number;
+  observedThreads: number;
+  observedTurns: number;
+  inputTokens: number;
+  cachedInputTokens: number;
+  cacheWriteInputTokens: number;
+  outputTokens: number;
+  reasoningOutputTokens: number;
+  lastDesktopActivity: number | null;
+  pricingCoveragePercent: number;
+  apiEquivalentCostUsd: number | null;
   message: string | null;
 }
 
-export type AppServerStatus =
-  | "stopped"
-  | "starting"
-  | "running"
-  | "stopping"
-  | "failed";
-
-export type ProtocolHandshakeStatus =
-  | "notInitialized"
-  | "initializing"
-  | "initialized"
-  | "failed";
-
-export interface AppServerStatusInfo {
-  status: AppServerStatus;
-  pid: number | null;
-  startedAt: number | null;
-  executablePath: string | null;
-  transport: string;
-  jsonRpcConnected: boolean;
-  handshakeStatus: ProtocolHandshakeStatus;
-  serverUserAgent: string | null;
-  platformFamily: string | null;
-  platformOs: string | null;
-  lastError: string | null;
-}
-
-export type SchemaCompatibilityStatus =
-  | "compatible"
-  | "limited"
-  | "incompatible"
-  | "unavailable"
-  | "error";
-
-export type CompatibilityCheckCategory = "method" | "field" | "feature";
-
-export interface CompatibilityCheck {
-  key: string;
-  category: CompatibilityCheckCategory;
-  required: boolean;
-  present: boolean;
-}
-
-export interface SchemaCompatibilityReport {
-  status: SchemaCompatibilityStatus;
-  codexVersion: string | null;
-  checkedAt: number;
-  schemaGenerated: boolean;
-  stableSurface: boolean;
-  schemaFileCount: number;
-  schemaTotalBytes: number;
-  requiredPassed: number;
-  requiredTotal: number;
-  optionalPassed: number;
-  optionalTotal: number;
-  coreMonitoringCompatible: boolean;
-  advancedThreadUsageSupported: boolean;
-  checks: CompatibilityCheck[];
-  warnings: string[];
-  message: string | null;
-}
-
-export type AccountStatus = "connected" | "noAccount" | "unavailable" | "error";
-
-export interface CodexAccountInfo {
-  status: AccountStatus;
-  accountType: string | null;
-  emailMasked: string | null;
-  planType: string | null;
-  credentialSource: string | null;
-  requiresOpenaiAuth: boolean | null;
-  authMode: string | null;
-  updatedAt: number;
-  message: string | null;
+export interface DesktopThreadUsageInfo {
+  status: "observing" | "unavailable" | "error";
+  coverage: string;
+  inventoryThreadCount: number;
+  inventoryTruncated: boolean;
+  observedThreadCount: number;
+  snapshotCount: number;
+  latestObservedAt: number | null;
+  coverageGapDetected: boolean;
+  message: string;
 }
 
 export type RateLimitStatus = "available" | "unavailable" | "error";
@@ -211,20 +184,6 @@ export interface CodexUsageInfo {
   dailyBuckets: DailyUsageBucket[];
   updatedAt: number;
   message: string | null;
-}
-
-export type ThreadUsageStatus = "observing" | "unavailable" | "error";
-
-export interface ThreadUsageInfo {
-  status: ThreadUsageStatus;
-  coverage: string;
-  inventoryThreadCount: number;
-  inventoryTruncated: boolean;
-  observedThreadCount: number;
-  snapshotCount: number;
-  latestObservedAt: number | null;
-  coverageGapDetected: boolean;
-  message: string;
 }
 
 export interface ProjectUsageAggregate {
