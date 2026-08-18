@@ -448,6 +448,10 @@ h3 {
   grid-template-columns: repeat(4, minmax(0, 1fr));
 }
 
+.metric-grid--five {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
 .metric-grid--two {
   grid-template-columns: repeat(2, minmax(0, 1fr));
 }
@@ -923,6 +927,10 @@ h3 {
   }
 
   .metric-grid--four {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .metric-grid--five {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

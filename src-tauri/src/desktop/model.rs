@@ -60,6 +60,8 @@ pub(crate) struct DesktopUsageActivity {
     pub(crate) observed_turns: usize,
     pub(crate) input_tokens: u64,
     pub(crate) cached_input_tokens: u64,
+    pub(crate) uncached_input_tokens: u64,
+    pub(crate) cached_input_ratio_percent: f64,
     pub(crate) cache_write_input_tokens: u64,
     pub(crate) output_tokens: u64,
     pub(crate) reasoning_output_tokens: u64,

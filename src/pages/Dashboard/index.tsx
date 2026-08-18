@@ -147,11 +147,12 @@ export default function DashboardPage() {
         <section className="info-panel"><div className="info-panel__icon" aria-hidden="true">i</div><div><h2>未找到 Codex 桌面版本地数据</h2><p>请先打开 Codex 桌面版并正常使用一次。</p></div></section>
       ) : null}
 
-      <div className="metric-grid metric-grid--four">
-        <div className="metric-card"><p className="metric-card__title">今日桌面版 Token</p><p className="metric-card__value">{activity ? formatNumber(activity.todayTokens) : "--"}</p><p className="metric-card__subtitle">来自本地桌面版会话的推导数据</p></div>
-        <div className="metric-card"><p className="metric-card__title">已观测桌面版 Token</p><p className="metric-card__value">{activity ? formatNumber(activity.observedTokens) : "--"}</p><p className="metric-card__subtitle">输入、缓存、输出与推理增量</p></div>
+      <div className="metric-grid metric-grid--five">
+        <div className="metric-card"><p className="metric-card__title">今日模型处理 Token</p><p className="metric-card__value">{activity ? formatNumber(activity.todayTokens) : "--"}</p><p className="metric-card__subtitle">按本地时间汇总，包含重复上下文与缓存输入</p></div>
+        <div className="metric-card"><p className="metric-card__title">累计模型处理 Token</p><p className="metric-card__value">{activity ? formatNumber(activity.observedTokens) : "--"}</p><p className="metric-card__subtitle">所有已观测模型调用的 Token 累计</p></div>
         <div className="metric-card"><p className="metric-card__title">已观测会话</p><p className="metric-card__value">{activity ? formatNumber(activity.observedThreads) : "--"}</p><p className="metric-card__subtitle">{activity ? formatNumber(activity.observedTurns) : "--"} 个已观测回合</p></div>
-        <div className="metric-card"><p className="metric-card__title">API 等效成本</p><p className="metric-card__value">{formatCost(activity?.apiEquivalentCostUsd ?? null)}</p><p className="metric-card__subtitle">仅统计已观测桌面版事件 · 覆盖率 {activity?.pricingCoveragePercent.toFixed(1) ?? "0.0"}%</p></div>
+        <div className="metric-card"><p className="metric-card__title">非缓存输入 Token</p><p className="metric-card__value">{activity ? formatNumber(activity.uncachedInputTokens) : "--"}</p><p className="metric-card__subtitle">输入减去缓存输入与写入 · 缓存输入占比 {activity?.cachedInputRatioPercent.toFixed(1) ?? "0.0"}%</p></div>
+        <div className="metric-card"><p className="metric-card__title">API 等效成本</p><p className="metric-card__value">{formatCost(activity?.apiEquivalentCostUsd ?? null)}</p><p className="metric-card__subtitle">按已观测 Token 和对应 API 单价折算，不是 Plus 订阅实际扣费 · 覆盖率 {activity?.pricingCoveragePercent.toFixed(1) ?? "0.0"}%</p></div>
       </div>
 
       <section className="section-block" aria-labelledby="rate-limit-heading">
@@ -171,15 +172,17 @@ export default function DashboardPage() {
       </section>
 
       <section className="section-block" aria-labelledby="activity-heading">
-        <div className="section-heading"><div><p className="section-kicker">本地推导汇总</p><h2 id="activity-heading">桌面版 Token 活动</h2></div><StatusBadge variant="warning">推导</StatusBadge></div>
+        <div className="section-heading"><div><p className="section-kicker">本地推导汇总</p><h2 id="activity-heading">模型处理 Token 构成</h2></div><StatusBadge variant="warning">推导</StatusBadge></div>
         <div className="metric-grid metric-grid--four">
           <div className="metric-card"><p className="metric-card__title">输入</p><p className="metric-card__value">{activity ? formatNumber(activity.inputTokens) : "--"}</p></div>
           <div className="metric-card"><p className="metric-card__title">缓存输入</p><p className="metric-card__value">{activity ? formatNumber(activity.cachedInputTokens) : "--"}</p></div>
-          <div className="metric-card"><p className="metric-card__title">缓存写入</p><p className="metric-card__value">{activity ? formatNumber(activity.cacheWriteInputTokens) : "--"}</p></div>
+          <div className="metric-card"><p className="metric-card__title">非缓存输入</p><p className="metric-card__value">{activity ? formatNumber(activity.uncachedInputTokens) : "--"}</p></div>
           <div className="metric-card"><p className="metric-card__title">输出 / 推理输出</p><p className="metric-card__value">{`${formatNumber(activity?.outputTokens ?? 0)} / ${formatNumber(activity?.reasoningOutputTokens ?? 0)}`}</p></div>
         </div>
-        <p className="codex-message">最近桌面版活动：{ago(activity?.lastDesktopActivity)} · 计价覆盖率：{activity?.pricingCoveragePercent.toFixed(1) ?? "0.0"}%</p>
+        <p className="codex-message">缓存输入占比：{activity?.cachedInputRatioPercent.toFixed(1) ?? "0.0"}% · 缓存写入：{formatNumber(activity?.cacheWriteInputTokens ?? 0)} · 最近模型活动：{ago(activity?.lastDesktopActivity)} · 计价覆盖率：{activity?.pricingCoveragePercent.toFixed(1) ?? "0.0"}%</p>
       </section>
+
+      <p className="codex-message">Token 为 Codex 各次模型调用处理量的累计，包含重复上下文和缓存输入，不等同于用户手工输入文字量。API 等效成本按已观测 Token 和对应 API 单价折算，不是 Plus 订阅实际扣费。</p>
 
       <section className="section-block" aria-labelledby="diagnostics-heading">
         <div className="section-heading"><div><p className="section-kicker">只读诊断</p><h2 id="diagnostics-heading">Codex 桌面版数据源</h2></div><StatusBadge variant={environment?.desktopRunning === true ? "success" : "neutral"}>{environment?.desktopRunning === true ? "桌面版运行中" : "桌面版状态未知"}</StatusBadge></div>

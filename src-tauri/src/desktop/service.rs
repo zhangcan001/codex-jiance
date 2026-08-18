@@ -254,6 +254,15 @@ impl DesktopService {
         } else {
             totals.priced_events as f64 / totals.total_events as f64 * 100.0
         };
+        let uncached_input_tokens = totals
+            .input_tokens
+            .saturating_sub(totals.cached_input_tokens)
+            .saturating_sub(totals.cache_write_input_tokens);
+        let cached_input_ratio_percent = if totals.input_tokens == 0 {
+            0.0
+        } else {
+            totals.cached_input_tokens as f64 / totals.input_tokens as f64 * 100.0
+        };
         Ok(DesktopUsageActivity {
             status: if totals.total_events == 0 {
                 "unavailable"
@@ -267,6 +276,8 @@ impl DesktopService {
             observed_turns: totals.observed_turns,
             input_tokens: totals.input_tokens,
             cached_input_tokens: totals.cached_input_tokens,
+            uncached_input_tokens,
+            cached_input_ratio_percent,
             cache_write_input_tokens: totals.cache_write_input_tokens,
             output_tokens: totals.output_tokens,
             reasoning_output_tokens: totals.reasoning_output_tokens,

@@ -44,6 +44,8 @@ export interface DesktopUsageActivity {
   observedTurns: number;
   inputTokens: number;
   cachedInputTokens: number;
+  uncachedInputTokens: number;
+  cachedInputRatioPercent: number;
   cacheWriteInputTokens: number;
   outputTokens: number;
   reasoningOutputTokens: number;

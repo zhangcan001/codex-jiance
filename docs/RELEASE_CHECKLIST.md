@@ -98,3 +98,18 @@
 - 旧 App Server 历史：保留 `1` 条；用户设置：保留 `1` 条；外部 Codex `state_5.sqlite` 仍只读访问。
 - 环境诊断：Codex Home 为 `C:\Users\ADMIN\.codex`；Sessions Path 为 `C:\Users\ADMIN\.codex\sessions`；State DB 为 `C:\Users\ADMIN\.codex\state_5.sqlite`。
 - 解析修正：RFC3339/秒/毫秒时间戳、payload-level `rate_limits`、`info=null` rate-limit-only、Primary/Secondary 双窗口、窗口规范化、canonical thread/fork 保护和项目历史日期均已覆盖自动化测试。
+
+## Token 统计终审
+
+- 结论：`CURRENT TOKEN ACCOUNTING VALID`。未因总量偏大而修改 Token delta、Pricing、Desktop source 筛选、Schema 或索引版本。
+- 只读工具：`tools/desktop_token_audit.py`，使用 SQLite `file:<path>?mode=ro`，不执行写入 SQL，不读取或输出 Prompt、助手内容、推理文本、工具参数或会话正文。
+- 审计快照：Delta 事件 `199,410`；Observed Tokens `27,775,307,476`；Today Tokens `13,723,385,498`；Input `27,699,757,857`；Cached Input `26,925,846,016`；Uncached Input `773,911,841`；Output `75,549,619`；Reasoning `24,278,343`；缓存输入占比 `97.2061%`；API Equivalent Cost `$3,247.9618`。
+- Audit A/B：Total/Input/Cached/Output 与 `last_*` 精确匹配率 `99.9995%`，Reasoning `100%`；SUM delta 与 SUM last 的 Total 差 `51,610`，相对差 `0.0001858%`。唯一差异是一个跨更新累计推进事件：Delta `102,397`，`last_total_tokens` `50,787`，累计数学关系仍成立。
+- Audit C：累计值数学一致性 eligible `199,195`，正确 `199,195`，错误 `0`，正确率 `100%`。
+- Audit D：首事件 A（`total == last` 且计入 delta）`215`；B（`total != last` 且 baseline）`0`；C（其他）`0`。
+- Audit F/G：独立 Today 汇总与 UI Today 口径完全一致；最近 30 天有 `14` 个日期产生 Token 活动，历史数据未集中到今天。
+- Audit H：单事件最大 `323,923`；P50 `141,839`；P90 `217,615`；P99 `239,560`；P99.9 `245,071`；超过 context window `3` 条，超过 2 倍 `0` 条，无系统性异常超大事件。
+- Audit J：State DB 检查 `400`，匹配 `214`，不匹配 `186`；无 Desktop rollout `185`（均为 VSCode 来源会话：用户/自动化，非 Desktop Direct）；Monitor lower `1`（差 `35,123`）；Monitor higher `0`；近 15 分钟活动线程 `2`，均非 mismatch。
+- Weekly Rate Limit：当前 `83%`；最近同一 `limit_id/window_kind/duration/resets_at` 的 64 个历史点均为 `83%`，Burn Rate `0.00` 有数据依据。
+- UI 语义优化：Dashboard 改为“今日模型处理 Token”“累计模型处理 Token”，新增“非缓存输入 Token”和缓存输入占比，并说明 Token 包含重复上下文/缓存输入；API 等效成本明确为按 API 单价折算，不是 Plus 订阅实际扣费。
+- 本轮没有提升 `desktop_index_revision`，仍为 `2`；Release Ready：`NO`，等待用户确认 Token 统计终审结果。
