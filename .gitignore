@@ -15,6 +15,10 @@ target/
 *.db
 *.db-shm
 *.db-wal
+*.tmp
+*.temp
+temp/
+.tmp/
 
 # Editor directories and files
 .vscode/*
