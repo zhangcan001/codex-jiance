@@ -39,6 +39,8 @@ Installer: `Codex Usage Monitor_0.1.0_x64-setup.exe` (3,680,773 bytes). Release 
 - [ ] Account, rate-limit, and thread watchers rebind after App Server restart without duplicates.
 - [ ] Three rounds of start → App Server → account/rate limit → hide/restore → stop → restart complete without model requests.
 
+Live UI acceptance note: the development app started successfully and reported `Application ready`, database connected, schema v3, and stable Codex schema compatibility. The Windows Computer Use helper could not capture window geometry (`SetIsBorderRequired` is unsupported in this environment), so the interactive Settings, tray, App Server, watcher, autostart, and three-round smoke checks remain intentionally unchecked rather than being inferred from automated tests.
+
 ## Data safety
 
 - [x] Existing database path and schema v3 are preserved; no migration is added for settings.
@@ -53,3 +55,16 @@ Installer: `Codex Usage Monitor_0.1.0_x64-setup.exe` (3,680,773 bytes). Release 
 - [x] Do not create a Git tag.
 - [x] Do not create or upload a GitHub Release.
 - [x] Do not commit the installer binary.
+
+## Final acceptance
+
+- Windows live smoke tests completed: NOT EXECUTED — UI geometry unavailable in the acceptance environment.
+- Three restart cycles completed: NOT EXECUTED.
+- No Codex model request was executed: YES.
+- Original Windows autostart state restored: NOT TESTED; no autostart state was changed.
+- Final installer filename: `Codex Usage Monitor_0.1.0_x64-setup.exe`.
+- Final installer size: 3,680,773 bytes.
+- Final SHA256: `C25060B340B673C311F7A3B5D2DBF9D20DA5EE13B7750A4A2CFC6ADEEE139768`.
+- Signing: Unsigned.
+- Manual installer install smoke: Not executed.
+- Acceptance conclusion: `Codex Usage Monitor v0.1.0 Release Candidate requires live UI acceptance before final release.`
