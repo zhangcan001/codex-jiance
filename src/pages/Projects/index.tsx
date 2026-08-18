@@ -46,7 +46,7 @@ export default function ProjectsPage() {
   return (
     <div className="page">
       <header className="page-header">
-        <div><p className="page-kicker">推导用量</p><h1>{zhCN.nav.projects}</h1><p className="page-subtitle">按官方线程工作目录归类的已观测 Token 增量。</p></div>
+        <div><p className="page-kicker">推导用量</p><h1>{zhCN.nav.projects}</h1><p className="page-subtitle">按 Codex 桌面版会话工作目录归类的已观测 Token 增量。</p></div>
         <div className="section-heading__actions">
           {(["today", "7d", "30d", "all"] as Range[]).map((value) => <button className="button button--secondary button--compact" key={value} type="button" onClick={() => setRange(value)} disabled={range === value}>{value === "today" ? zhCN.range.today : value === "7d" ? zhCN.range.sevenDays : value === "30d" ? zhCN.range.thirtyDays : zhCN.range.all}</button>)}
         </div>

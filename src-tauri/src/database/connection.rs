@@ -19,6 +19,12 @@ pub async fn create_pool(database_url: &str) -> Result<SqlitePool, AppError> {
                 sqlx::query("PRAGMA foreign_keys = ON")
                     .execute(&mut *connection)
                     .await?;
+                sqlx::query("PRAGMA journal_mode = WAL")
+                    .execute(&mut *connection)
+                    .await?;
+                sqlx::query("PRAGMA synchronous = NORMAL")
+                    .execute(&mut *connection)
+                    .await?;
                 Ok(())
             })
         })

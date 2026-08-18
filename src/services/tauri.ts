@@ -93,6 +93,10 @@ export function refreshDesktopIndex(): Promise<DesktopMonitorStatus> {
   return invokeCommand<DesktopMonitorStatus>("refresh_desktop_index");
 }
 
+export function rebuildDesktopIndex(): Promise<DesktopMonitorStatus> {
+  return invokeCommand<DesktopMonitorStatus>("rebuild_desktop_index");
+}
+
 export function getDesktopActivity(): Promise<DesktopUsageActivity> {
   return invokeCommand<DesktopUsageActivity>("get_desktop_activity");
 }

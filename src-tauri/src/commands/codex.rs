@@ -37,6 +37,13 @@ pub async fn refresh_desktop_index(
 }
 
 #[tauri::command]
+pub async fn rebuild_desktop_index(
+    state: State<'_, AppState>,
+) -> CommandResult<DesktopMonitorStatus> {
+    state.desktop_service.rebuild().await.map_err(Into::into)
+}
+
+#[tauri::command]
 pub async fn get_desktop_activity(
     state: State<'_, AppState>,
 ) -> CommandResult<DesktopUsageActivity> {

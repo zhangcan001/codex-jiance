@@ -82,6 +82,7 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::codex::get_desktop_environment,
             commands::codex::get_desktop_monitor_status,
             commands::codex::refresh_desktop_index,
+            commands::codex::rebuild_desktop_index,
             commands::codex::get_desktop_activity,
             commands::codex::get_codex_rate_limits,
             commands::codex::get_codex_burn_rates,

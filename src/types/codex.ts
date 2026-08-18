@@ -21,6 +21,12 @@ export interface DesktopMonitorStatus {
   desktopTokenEvents: number;
   deltaEvents: number;
   baselineOnlyEvents: number;
+  rawRateLimitEvents: number;
+  parsedRateLimitObservations: number;
+  reconciliationChecked: number;
+  reconciliationMatched: number;
+  reconciliationMismatched: number;
+  indexRevision: number;
   lastScanAt: number | null;
   lastDesktopEventAt: number | null;
   backfillComplete: boolean;

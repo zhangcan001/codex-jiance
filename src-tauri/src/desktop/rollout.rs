@@ -4,6 +4,7 @@ use std::{
     path::Path,
 };
 
+use chrono::DateTime;
 use serde_json::Value;
 
 use crate::error::AppError;
@@ -77,9 +78,9 @@ pub(crate) enum RolloutEvent {
     SessionMeta(SessionMeta),
     TurnContext(TurnContext),
     TokenCount {
-        event_at: i64,
+        event_at: Option<i64>,
         turn_id: Option<String>,
-        total: TokenCounts,
+        total: Option<TokenCounts>,
         last: TokenCounts,
         model_context_window: Option<u64>,
         rate_limits: Vec<RateLimitObservation>,
@@ -94,6 +95,7 @@ pub(crate) struct RolloutReadResult {
     pub(crate) modified_at: Option<i64>,
     pub(crate) oversized_lines: usize,
     pub(crate) parse_errors: usize,
+    pub(crate) timestamp_errors: usize,
 }
 
 enum BoundedLine {
@@ -117,6 +119,7 @@ pub(crate) fn read_rollout(path: &Path, offset: u64) -> Result<RolloutReadResult
     let mut next_offset = start;
     let mut oversized_lines = 0;
     let mut parse_errors = 0;
+    let mut timestamp_errors = 0;
     loop {
         let Some(line) = read_bounded_line(&mut reader, MAX_ROLLOUT_LINE_BYTES)? else {
             break;
@@ -131,9 +134,12 @@ pub(crate) fn read_rollout(path: &Path, offset: u64) -> Result<RolloutReadResult
                 }
                 match serde_json::from_slice::<Value>(&bytes)
                     .ok()
-                    .and_then(|value| parse_event(&value))
+                    .and_then(|value| parse_event_diagnostic(&value))
                 {
-                    Some(event) => events.push(event),
+                    Some(parsed) => {
+                        timestamp_errors += usize::from(parsed.timestamp_error);
+                        events.push(parsed.event);
+                    }
                     None => parse_errors += 1,
                 }
             }
@@ -146,6 +152,7 @@ pub(crate) fn read_rollout(path: &Path, offset: u64) -> Result<RolloutReadResult
         modified_at,
         oversized_lines,
         parse_errors,
+        timestamp_errors,
     })
 }
 
@@ -183,15 +190,32 @@ fn read_bounded_line<R: BufRead>(
     }
 }
 
+struct ParsedEvent {
+    event: RolloutEvent,
+    timestamp_error: bool,
+}
+
+#[cfg(test)]
 fn parse_event(value: &Value) -> Option<RolloutEvent> {
+    parse_event_diagnostic(value).map(|parsed| parsed.event)
+}
+
+fn parse_event_diagnostic(value: &Value) -> Option<ParsedEvent> {
     let payload = value.get("payload").unwrap_or(value);
     let kind = string(value, &["type", "event_type", "eventType"])
         .or_else(|| string(payload, &["type", "event_type", "eventType"]))?;
-    let event_at = integer(value, &["timestamp", "event_at", "eventAt"])
-        .or_else(|| integer(payload, &["timestamp", "event_at", "eventAt"]))
-        .unwrap_or(0);
-    match kind.to_ascii_lowercase().as_str() {
-        "session_meta" | "sessionmeta" => Some(RolloutEvent::SessionMeta(SessionMeta {
+    let (outer_event_at, outer_has_timestamp) = timestamp(value);
+    let (payload_event_at, payload_has_timestamp) = timestamp(payload);
+    let event_at = outer_event_at.or(payload_event_at);
+    let timestamp_error = if outer_has_timestamp {
+        outer_event_at.is_none()
+    } else if payload_has_timestamp {
+        payload_event_at.is_none()
+    } else {
+        false
+    };
+    let event = match kind.to_ascii_lowercase().as_str() {
+        "session_meta" | "sessionmeta" => RolloutEvent::SessionMeta(SessionMeta {
             thread_id: string(
                 payload,
                 &["thread_id", "threadId", "id", "session_id", "sessionId"],
@@ -202,40 +226,58 @@ fn parse_event(value: &Value) -> Option<RolloutEvent> {
             cwd: string(payload, &["cwd", "working_directory", "workingDirectory"]),
             model_provider: string(payload, &["model_provider", "modelProvider"]),
             thread_source: string(payload, &["source", "thread_source", "threadSource"]),
-            event_at: Some(event_at),
-        })),
-        "turn_context" | "turncontext" => Some(RolloutEvent::TurnContext(TurnContext {
+            event_at,
+        }),
+        "turn_context" | "turncontext" => RolloutEvent::TurnContext(TurnContext {
             turn_id: string(payload, &["turn_id", "turnId", "id"]),
             model: string(payload, &["model", "model_id", "modelId"]),
             cwd: string(payload, &["cwd", "working_directory", "workingDirectory"]),
             reasoning_effort: string(payload, &["reasoning_effort", "reasoningEffort"]),
-        })),
+        }),
         "event_msg" | "eventmsg"
             if string(payload, &["type"]).as_deref() == Some("token_count") =>
         {
-            parse_token_count(value, payload, event_at)
+            parse_token_count(value, payload, event_at)?
         }
-        _ => None,
-    }
+        _ => return None,
+    };
+    Some(ParsedEvent {
+        event,
+        timestamp_error,
+    })
 }
 
-fn parse_token_count(value: &Value, payload: &Value, event_at: i64) -> Option<RolloutEvent> {
-    let info = payload.get("info").unwrap_or(payload);
-    let total_value = info
-        .get("total_token_usage")
-        .or_else(|| info.get("totalTokenUsage"))?;
+fn parse_token_count(
+    value: &Value,
+    payload: &Value,
+    event_at: Option<i64>,
+) -> Option<RolloutEvent> {
+    let info = payload.get("info").filter(|value| value.is_object());
+    let total = info
+        .and_then(|info| {
+            info.get("total_token_usage")
+                .or_else(|| info.get("totalTokenUsage"))
+        })
+        .and_then(parse_counts);
     let last_value = info
-        .get("last_token_usage")
-        .or_else(|| info.get("lastTokenUsage"))
+        .and_then(|info| {
+            info.get("last_token_usage")
+                .or_else(|| info.get("lastTokenUsage"))
+        })
         .unwrap_or(&Value::Null);
-    let total = parse_counts(total_value)?;
     let last = parse_counts(last_value).unwrap_or_default();
-    let model_context_window = integer(info, &["model_context_window", "modelContextWindow"])
+    let model_context_window = info
+        .and_then(|info| integer(info, &["model_context_window", "modelContextWindow"]))
         .and_then(|value| u64::try_from(value).ok());
     let thread_id = string(value, &["thread_id", "threadId"])
         .or_else(|| string(payload, &["thread_id", "threadId"]));
+    let legacy_info =
+        info.and_then(|info| info.get("rate_limits").or_else(|| info.get("rateLimits")));
     let rate_limits = parse_rate_limits(
-        info.get("rate_limits").or_else(|| info.get("rateLimits")),
+        payload
+            .get("rate_limits")
+            .or_else(|| payload.get("rateLimits"))
+            .or(legacy_info),
         event_at,
         thread_id.clone(),
     );
@@ -274,16 +316,16 @@ fn parse_counts(value: &Value) -> Option<TokenCounts> {
 
 fn parse_rate_limits(
     value: Option<&Value>,
-    event_at: i64,
+    event_at: Option<i64>,
     thread_id: Option<String>,
 ) -> Vec<RateLimitObservation> {
-    let Some(Value::Object(limits)) = value else {
+    let Some(limits) = value.and_then(Value::as_object) else {
         return Vec::new();
     };
-    limits
-        .iter()
-        .filter_map(|(kind, value)| {
-            let object = value.as_object()?;
+    let windows = ["primary", "secondary"]
+        .into_iter()
+        .filter_map(|kind| {
+            let object = limits.get(kind)?.as_object()?;
             let used_percent = number(object, &["used_percent", "usedPercent"])?;
             if !used_percent.is_finite() {
                 return None;
@@ -297,33 +339,38 @@ fn parse_rate_limits(
                 ],
             );
             let canonical_window_minutes = raw_window_minutes.and_then(canonical_window_minutes);
-            let resets_at = integer_value(object, &["resets_at", "resetsAt"]).or_else(|| {
+            let reported_resets_at = integer_value(object, &["resets_at", "resetsAt"]);
+            let resets_at = reported_resets_at.or_else(|| {
                 integer_value(object, &["resets_in_seconds", "resetsInSeconds"])
-                    .map(|seconds| event_at.saturating_add(seconds))
+                    .and_then(|seconds| event_at.map(|at| at.saturating_add(seconds)))
             });
-            let resets_at_source = if integer_value(object, &["resets_at", "resetsAt"]).is_some() {
+            let resets_at_source = if reported_resets_at.is_some() {
                 "reported".to_owned()
             } else if resets_at.is_some() {
                 "derived_from_remaining_seconds".to_owned()
             } else {
                 "unknown".to_owned()
             };
-            Some(RateLimitObservation {
-                event_at,
-                thread_id: thread_id.clone(),
-                limit_id: string_value(object, &["limit_id", "limitId"]),
-                limit_name: string_value(object, &["limit_name", "limitName"]),
-                plan_type: string_value(object, &["plan_type", "planType"]),
-                windows: vec![RateLimitWindowObservation {
-                    window_kind: kind.to_owned(),
-                    used_percent: used_percent.clamp(0.0, 100.0),
-                    raw_window_minutes,
-                    canonical_window_minutes,
-                    resets_at,
-                    resets_at_source,
-                }],
+            Some(RateLimitWindowObservation {
+                window_kind: kind.to_owned(),
+                used_percent: used_percent.clamp(0.0, 100.0),
+                raw_window_minutes,
+                canonical_window_minutes,
+                resets_at,
+                resets_at_source,
             })
         })
+        .collect::<Vec<_>>();
+    (!windows.is_empty())
+        .then_some(RateLimitObservation {
+            event_at: event_at.unwrap_or(0),
+            thread_id,
+            limit_id: string_value(limits, &["limit_id", "limitId"]),
+            limit_name: string_value(limits, &["limit_name", "limitName"]),
+            plan_type: string_value(limits, &["plan_type", "planType"]),
+            windows,
+        })
+        .into_iter()
         .collect()
 }
 
@@ -358,6 +405,50 @@ fn string_value(value: &serde_json::Map<String, Value>, keys: &[&str]) -> Option
 fn integer(value: &Value, keys: &[&str]) -> Option<i64> {
     keys.iter()
         .find_map(|key| value.get(*key).and_then(integer_value_ref))
+}
+
+fn timestamp(value: &Value) -> (Option<i64>, bool) {
+    ["timestamp", "event_at", "eventAt"]
+        .into_iter()
+        .find_map(|key| {
+            value
+                .get(key)
+                .map(|value| (parse_timestamp_value(value), true))
+        })
+        .unwrap_or((None, false))
+}
+
+fn parse_timestamp_value(value: &Value) -> Option<i64> {
+    let parsed = value
+        .as_i64()
+        .or_else(|| value.as_u64().and_then(|value| i64::try_from(value).ok()))
+        .or_else(|| {
+            value
+                .as_f64()
+                .filter(|value| value.is_finite())
+                .map(|value| value as i64)
+        })
+        .or_else(|| {
+            let text = value.as_str()?.trim();
+            text.parse::<i64>()
+                .ok()
+                .or_else(|| {
+                    text.parse::<f64>()
+                        .ok()
+                        .filter(|value| value.is_finite())
+                        .map(|value| value as i64)
+                })
+                .or_else(|| {
+                    DateTime::parse_from_rfc3339(text)
+                        .ok()
+                        .map(|value| value.timestamp())
+                })
+        })?;
+    Some(if parsed >= 1_000_000_000_000 {
+        parsed / 1_000
+    } else {
+        parsed
+    })
 }
 
 fn integer_value(value: &serde_json::Map<String, Value>, keys: &[&str]) -> Option<i64> {
@@ -429,11 +520,144 @@ mod tests {
         else {
             panic!("token event expected")
         };
-        assert_eq!(total.cache_write_input_tokens, Some(100));
+        assert_eq!(total.unwrap().cache_write_input_tokens, Some(100));
         assert_eq!(
             rate_limits[0].windows[0].canonical_window_minutes,
             Some(300)
         );
+    }
+
+    #[test]
+    fn parses_rfc3339_utc_timestamp_without_using_now() {
+        let expected = chrono::DateTime::parse_from_rfc3339("2026-08-17T03:04:05.123Z")
+            .unwrap()
+            .timestamp();
+        assert_eq!(
+            parse_timestamp_value(&serde_json::json!("2026-08-17T03:04:05.123Z")),
+            Some(expected)
+        );
+    }
+
+    #[test]
+    fn parses_rfc3339_timezone_offset_as_utc() {
+        let utc = parse_timestamp_value(&serde_json::json!("2026-08-18T12:46:07+08:00"));
+        let expected = chrono::DateTime::parse_from_rfc3339("2026-08-18T04:46:07Z")
+            .unwrap()
+            .timestamp();
+        assert_eq!(utc, Some(expected));
+    }
+
+    #[test]
+    fn parses_seconds_milliseconds_and_numeric_strings() {
+        let seconds = 1_755_400_000_i64;
+        assert_eq!(
+            parse_timestamp_value(&serde_json::json!(seconds)),
+            Some(seconds)
+        );
+        assert_eq!(
+            parse_timestamp_value(&serde_json::json!(seconds * 1_000)),
+            Some(seconds)
+        );
+        assert_eq!(
+            parse_timestamp_value(&serde_json::json!("1755400000")),
+            Some(1_755_400_000)
+        );
+    }
+
+    #[test]
+    fn parses_payload_level_rate_limits_with_metadata_and_two_windows() {
+        let value = serde_json::json!({
+            "type": "event_msg",
+            "timestamp": "2026-08-18T04:00:00Z",
+            "payload": {
+                "type": "token_count",
+                "info": null,
+                "rate_limits": {
+                    "limit_id": "codex",
+                    "limit_name": "Codex",
+                    "plan_type": "plus",
+                    "primary": {"used_percent": 42.0, "window_minutes": 299, "resets_at": 1780000000},
+                    "secondary": {"used_percent": 15.0, "window_minutes": 10079, "resets_at": 1780500000}
+                }
+            }
+        });
+        let RolloutEvent::TokenCount {
+            total, rate_limits, ..
+        } = parse_event(&value).unwrap()
+        else {
+            panic!("token count expected")
+        };
+        assert!(total.is_none());
+        assert_eq!(rate_limits.len(), 1);
+        assert_eq!(rate_limits[0].limit_id.as_deref(), Some("codex"));
+        assert_eq!(rate_limits[0].plan_type.as_deref(), Some("plus"));
+        assert_eq!(rate_limits[0].windows.len(), 2);
+        assert_eq!(
+            rate_limits[0].windows[0].canonical_window_minutes,
+            Some(300)
+        );
+        assert_eq!(
+            rate_limits[0].windows[1].canonical_window_minutes,
+            Some(10_080)
+        );
+    }
+
+    #[test]
+    fn info_null_rate_limit_only_event_keeps_observation_without_token_delta() {
+        let value = serde_json::json!({
+            "type": "event_msg",
+            "timestamp": "2026-08-18T04:00:00Z",
+            "payload": {
+                "type": "token_count",
+                "info": null,
+                "rateLimits": {"primary": {"usedPercent": 42.0, "windowDurationMins": 300}}
+            }
+        });
+        let RolloutEvent::TokenCount {
+            total, rate_limits, ..
+        } = parse_event(&value).unwrap()
+        else {
+            panic!("token count expected")
+        };
+        assert!(total.is_none());
+        assert_eq!(rate_limits.len(), 1);
+        assert_eq!(rate_limits[0].windows[0].window_kind, "primary");
+    }
+
+    #[test]
+    fn invalid_timestamp_is_counted_without_replacing_event_with_now() {
+        let value = serde_json::json!({
+            "type": "event_msg",
+            "timestamp": "not-a-timestamp",
+            "payload": {"type": "token_count", "info": null}
+        });
+        let parsed = parse_event_diagnostic(&value).unwrap();
+        assert!(parsed.timestamp_error);
+        assert!(matches!(
+            parsed.event,
+            RolloutEvent::TokenCount { event_at: None, .. }
+        ));
+    }
+
+    #[test]
+    fn read_rollout_records_timestamp_parse_errors() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("rollout.jsonl");
+        std::fs::write(
+            &path,
+            format!(
+                "{}\n",
+                serde_json::json!({
+                    "type": "event_msg",
+                    "timestamp": "invalid",
+                    "payload": {"type": "token_count", "info": null}
+                })
+            ),
+        )
+        .unwrap();
+        let result = read_rollout(&path, 0).unwrap();
+        assert_eq!(result.timestamp_errors, 1);
+        assert_eq!(result.events.len(), 1);
     }
 
     #[test]

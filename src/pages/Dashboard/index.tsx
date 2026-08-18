@@ -10,6 +10,7 @@ import {
   getCodexRateLimits,
   getDesktopActivity,
   getDesktopMonitorStatus,
+  rebuildDesktopIndex,
   refreshDesktopIndex,
 } from "../../services/tauri";
 import type {
@@ -60,6 +61,7 @@ export default function DashboardPage() {
   const [error, setError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [rebuilding, setRebuilding] = useState(false);
 
   const load = useCallback(async () => {
     setError(null);
@@ -101,6 +103,19 @@ export default function DashboardPage() {
     }
   }
 
+  async function rebuild() {
+    if (!window.confirm("将重新解析 Codex 桌面版本地会话，仅重建监控器自己的派生数据，不会修改 Codex 数据。")) return;
+    setRebuilding(true);
+    try {
+      await rebuildDesktopIndex();
+      await load();
+    } catch (rebuildError) {
+      setError(rebuildError instanceof Error ? rebuildError.message : "桌面版索引重建失败。");
+    } finally {
+      setRebuilding(false);
+    }
+  }
+
   const environment = status?.environment;
   const plan = rateLimits?.windows.find((window) => window.planType)?.planType;
 
@@ -118,6 +133,9 @@ export default function DashboardPage() {
           </StatusBadge>
           <button className="button button--secondary" type="button" onClick={() => void refresh()} disabled={refreshing}>
             {refreshing ? "正在索引…" : "刷新索引"}
+          </button>
+          <button className="button button--secondary" type="button" onClick={() => void rebuild()} disabled={rebuilding}>
+            {rebuilding ? "正在重建…" : "重建桌面版索引"}
           </button>
         </div>
       </header>
@@ -175,6 +193,9 @@ export default function DashboardPage() {
           <DiagnosticRow label="已索引桌面版会话" value={status ? formatNumber(status.indexedDesktopSessions) : "--"} />
           <DiagnosticRow label="已跟踪会话记录" value={status ? formatNumber(status.trackedRollouts) : "--"} />
           <DiagnosticRow label="历史索引进度" value={status ? `${formatNumber(status.backfillIndexed)} / ${formatNumber(status.backfillTotal)}` : "--"} />
+          <DiagnosticRow label="额度原始事件 / 已解析观测" value={status ? `${formatNumber(status.rawRateLimitEvents)} / ${formatNumber(status.parsedRateLimitObservations)}` : "--"} />
+          <DiagnosticRow label="状态数据库校验" value={status ? `${formatNumber(status.reconciliationMatched)} 匹配 / ${formatNumber(status.reconciliationMismatched)} 不匹配（共 ${formatNumber(status.reconciliationChecked)}）` : "--"} />
+          <DiagnosticRow label="派生索引版本" value={status ? status.indexRevision.toString() : "--"} />
           <DiagnosticRow label="最近扫描" value={timestamp(status?.lastScanAt)} />
           <DiagnosticRow label="最近桌面版活动" value={timestamp(status?.lastDesktopEventAt)} />
         </div>

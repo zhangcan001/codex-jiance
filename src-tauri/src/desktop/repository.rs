@@ -1,4 +1,4 @@
-use sqlx::{Row, SqlitePool};
+use sqlx::{Row, SqlitePool, Transaction};
 
 use crate::{
     error::AppError,
@@ -32,6 +32,21 @@ pub(crate) struct TokenPersistResult {
     pub(crate) delta_event: bool,
 }
 
+#[derive(Debug, Clone)]
+pub(crate) struct DesktopTokenEvent {
+    pub(crate) rollout_path: String,
+    pub(crate) thread_id: String,
+    pub(crate) turn_id: String,
+    pub(crate) observed_at: i64,
+    pub(crate) total: TokenCounts,
+    pub(crate) last: TokenCounts,
+    pub(crate) model_context_window: Option<u64>,
+    pub(crate) cwd: Option<String>,
+    pub(crate) model: Option<String>,
+    pub(crate) originator: Option<String>,
+    pub(crate) byte_offset: u64,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) struct DesktopCounts {
     pub(crate) indexed_sessions: usize,
@@ -39,7 +54,15 @@ pub(crate) struct DesktopCounts {
     pub(crate) token_events: usize,
     pub(crate) delta_events: usize,
     pub(crate) baseline_only_events: usize,
+    pub(crate) parsed_rate_limit_observations: usize,
     pub(crate) latest_event_at: Option<i64>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
+pub(crate) struct ReconciliationCounts {
+    pub(crate) checked: usize,
+    pub(crate) matched: usize,
+    pub(crate) mismatched: usize,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -89,6 +112,76 @@ pub(crate) struct DesktopRepository {
 impl DesktopRepository {
     pub(crate) fn new(pool: SqlitePool) -> Self {
         Self { pool }
+    }
+
+    pub(crate) async fn desktop_index_revision(&self) -> Result<Option<i64>, AppError> {
+        Ok(sqlx::query_scalar(
+            "SELECT CAST(value AS INTEGER) FROM app_meta WHERE key='desktop_index_revision'",
+        )
+        .fetch_optional(&self.pool)
+        .await?)
+    }
+
+    pub(crate) async fn rebuild_desktop_index(&self) -> Result<(), AppError> {
+        let mut transaction = self.pool.begin().await?;
+        sqlx::query("DELETE FROM thread_token_snapshots WHERE source='desktop_rollout'")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM desktop_rate_limit_windows")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM desktop_rate_limit_observations WHERE source='desktop_rollout'")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM desktop_rollout_cursors")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query("DELETE FROM thread_metadata WHERE source='desktop'")
+            .execute(&mut *transaction)
+            .await?;
+        sqlx::query(
+            "INSERT INTO app_meta(key, value, updated_at) VALUES ('desktop_index_revision', '2', ?)
+             ON CONFLICT(key) DO UPDATE SET value='2', updated_at=excluded.updated_at",
+        )
+        .bind(now())
+        .execute(&mut *transaction)
+        .await?;
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn reconcile_state_threads(
+        &self,
+        threads: &[(String, Option<i64>)],
+    ) -> Result<ReconciliationCounts, AppError> {
+        let mut counts = ReconciliationCounts::default();
+        let latest: std::collections::HashMap<String, i64> = sqlx::query(
+            "SELECT thread_id, total_tokens FROM (
+                 SELECT thread_id, total_tokens,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY thread_id ORDER BY observed_at DESC, id DESC
+                        ) AS row_number
+                 FROM thread_token_snapshots
+                 WHERE source='desktop_rollout'
+             ) WHERE row_number=1",
+        )
+        .fetch_all(&self.pool)
+        .await?
+        .into_iter()
+        .map(|row| Ok((row.try_get("thread_id")?, row.try_get("total_tokens")?)))
+        .collect::<Result<_, sqlx::Error>>()?;
+        for (thread_id, tokens_used) in threads {
+            let Some(tokens_used) = tokens_used else {
+                continue;
+            };
+            counts.checked += 1;
+            if latest.get(thread_id) == Some(tokens_used) {
+                counts.matched += 1;
+            } else {
+                counts.mismatched += 1;
+            }
+        }
+        Ok(counts)
     }
 
     pub(crate) async fn cursor(&self, path: &str) -> Result<CursorRecord, AppError> {
@@ -142,6 +235,7 @@ impl DesktopRepository {
         Ok(())
     }
 
+    #[allow(dead_code)]
     pub(crate) async fn upsert_thread(
         &self,
         thread_id: &str,
@@ -208,6 +302,7 @@ impl DesktopRepository {
     }
 
     #[allow(clippy::too_many_arguments)]
+    #[allow(dead_code)]
     pub(crate) async fn persist_token_event(
         &self,
         rollout_path: &str,
@@ -222,9 +317,74 @@ impl DesktopRepository {
         originator: Option<&str>,
         byte_offset: u64,
     ) -> Result<TokenPersistResult, AppError> {
+        let mut transaction = self.pool.begin().await?;
+        let result = self
+            .persist_token_event_in_transaction(
+                &mut transaction,
+                rollout_path,
+                thread_id,
+                turn_id,
+                observed_at,
+                total,
+                last,
+                model_context_window,
+                cwd,
+                model,
+                originator,
+                byte_offset,
+            )
+            .await?;
+        transaction.commit().await?;
+        Ok(result)
+    }
+
+    pub(crate) async fn persist_token_events(
+        &self,
+        events: &[DesktopTokenEvent],
+    ) -> Result<(), AppError> {
+        if events.is_empty() {
+            return Ok(());
+        }
+        let mut transaction = self.pool.begin().await?;
+        for event in events {
+            self.persist_token_event_in_transaction(
+                &mut transaction,
+                &event.rollout_path,
+                &event.thread_id,
+                &event.turn_id,
+                event.observed_at,
+                &event.total,
+                &event.last,
+                event.model_context_window,
+                event.cwd.as_deref(),
+                event.model.as_deref(),
+                event.originator.as_deref(),
+                event.byte_offset,
+            )
+            .await?;
+        }
+        transaction.commit().await?;
+        Ok(())
+    }
+
+    #[allow(clippy::too_many_arguments)]
+    async fn persist_token_event_in_transaction(
+        &self,
+        transaction: &mut Transaction<'_, sqlx::Sqlite>,
+        rollout_path: &str,
+        thread_id: &str,
+        turn_id: &str,
+        observed_at: i64,
+        total: &TokenCounts,
+        last: &TokenCounts,
+        model_context_window: Option<u64>,
+        cwd: Option<&str>,
+        model: Option<&str>,
+        originator: Option<&str>,
+        byte_offset: u64,
+    ) -> Result<TokenPersistResult, AppError> {
         let current = total.values();
         let last_values = last.values();
-        let mut transaction = self.pool.begin().await?;
         let fingerprint = fingerprint(
             rollout_path,
             thread_id,
@@ -236,10 +396,9 @@ impl DesktopRepository {
         let duplicate: Option<i64> =
             sqlx::query_scalar("SELECT id FROM thread_token_snapshots WHERE fingerprint=? LIMIT 1")
                 .bind(&fingerprint)
-                .fetch_optional(&mut *transaction)
+                .fetch_optional(&mut **transaction)
                 .await?;
         if duplicate.is_some() {
-            transaction.commit().await?;
             return Ok(TokenPersistResult {
                 inserted: false,
                 baseline_only: false,
@@ -263,7 +422,7 @@ impl DesktopRepository {
         )
         .bind(thread_id).bind(thread_id).bind(cwd.unwrap_or("")).bind(&project_key).bind(&project_name)
         .bind(model).bind(originator).bind(observed_at).bind(observed_at).bind(observed_at).bind(now())
-        .execute(&mut *transaction).await?;
+        .execute(&mut **transaction).await?;
 
         let previous = sqlx::query(
             "SELECT total_tokens, input_tokens, cached_input_tokens, cache_write_input_tokens,
@@ -273,7 +432,7 @@ impl DesktopRepository {
              ORDER BY observed_at DESC, id DESC LIMIT 1",
         )
         .bind(thread_id)
-        .fetch_optional(&mut *transaction)
+        .fetch_optional(&mut **transaction)
         .await?
         .map(|row| {
             Ok::<_, AppError>([
@@ -358,8 +517,7 @@ impl DesktopRepository {
         .bind(delta.as_ref().and_then(|values| values.get(5).copied()).map(|value| sqlite_i64(value, "delta reasoning")).transpose()?)
         .bind(baseline_only as i64).bind(reset_detected as i64).bind(&fingerprint)
         .bind(total.cache_write_input_tokens.is_some() as i64).bind(originator).bind(rollout_path)
-        .execute(&mut *transaction).await?;
-        transaction.commit().await?;
+        .execute(&mut **transaction).await?;
         Ok(TokenPersistResult {
             inserted: true,
             baseline_only,
@@ -372,20 +530,26 @@ impl DesktopRepository {
         observations: &[RateLimitObservation],
     ) -> Result<bool, AppError> {
         let mut inserted = false;
+        let mut transaction = self.pool.begin().await?;
         for observation in observations {
-            for window in &observation.windows {
-                let fingerprint = fingerprint_rate(observation, window);
-                let mut transaction = self.pool.begin().await?;
-                let result = sqlx::query(
-                    "INSERT OR IGNORE INTO desktop_rate_limit_observations
-                     (event_at, observed_at, thread_id, limit_id, limit_name, plan_type, fingerprint)
-                     VALUES (?, ?, ?, ?, ?, ?, ?)",
-                )
-                .bind(observation.event_at).bind(now()).bind(&observation.thread_id)
-                .bind(&observation.limit_id).bind(&observation.limit_name).bind(&observation.plan_type).bind(&fingerprint)
-                .execute(&mut *transaction).await?;
-                if result.rows_affected() == 1 {
-                    let observation_id = result.last_insert_rowid();
+            let fingerprint = fingerprint_rate(observation);
+            let result = sqlx::query(
+                "INSERT OR IGNORE INTO desktop_rate_limit_observations
+                 (event_at, observed_at, thread_id, limit_id, limit_name, plan_type, fingerprint)
+                 VALUES (?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(observation.event_at)
+            .bind(now())
+            .bind(&observation.thread_id)
+            .bind(&observation.limit_id)
+            .bind(&observation.limit_name)
+            .bind(&observation.plan_type)
+            .bind(&fingerprint)
+            .execute(&mut *transaction)
+            .await?;
+            if result.rows_affected() == 1 {
+                let observation_id = result.last_insert_rowid();
+                for window in &observation.windows {
                     sqlx::query(
                         "INSERT INTO desktop_rate_limit_windows
                          (observation_id, window_kind, used_percent, raw_window_minutes,
@@ -401,11 +565,11 @@ impl DesktopRepository {
                     .bind(&window.resets_at_source)
                     .execute(&mut *transaction)
                     .await?;
-                    inserted = true;
                 }
-                transaction.commit().await?;
+                inserted = true;
             }
         }
+        transaction.commit().await?;
         Ok(inserted)
     }
 
@@ -651,6 +815,7 @@ impl DesktopRepository {
                (SELECT COUNT(*) FROM thread_token_snapshots WHERE source='desktop_rollout') AS token_events,
                (SELECT COUNT(*) FROM thread_token_snapshots WHERE source='desktop_rollout' AND delta_total_tokens IS NOT NULL) AS delta_events,
                (SELECT COUNT(*) FROM thread_token_snapshots WHERE source='desktop_rollout' AND baseline_only=1) AS baseline_only_events,
+               (SELECT COUNT(*) FROM desktop_rate_limit_observations WHERE source='desktop_rollout') AS parsed_rate_limit_observations,
                (SELECT MAX(observed_at) FROM thread_token_snapshots WHERE source='desktop_rollout') AS latest_event_at",
         ).fetch_one(&self.pool).await?;
         Ok(DesktopCounts {
@@ -662,6 +827,10 @@ impl DesktopRepository {
             delta_events: usize::try_from(row.try_get::<i64, _>("delta_events")?).unwrap_or(0),
             baseline_only_events: usize::try_from(row.try_get::<i64, _>("baseline_only_events")?)
                 .unwrap_or(0),
+            parsed_rate_limit_observations: usize::try_from(
+                row.try_get::<i64, _>("parsed_rate_limit_observations")?,
+            )
+            .unwrap_or(0),
             latest_event_at: row.try_get("latest_event_at")?,
         })
     }
@@ -780,21 +949,14 @@ fn fingerprint(
     fnv(&input)
 }
 
-fn fingerprint_rate(
-    observation: &RateLimitObservation,
-    window: &super::rollout::RateLimitWindowObservation,
-) -> String {
+fn fingerprint_rate(observation: &RateLimitObservation) -> String {
     fnv(&format!(
-        "{}|{:?}|{:?}|{:?}|{}|{:?}|{:?}|{}|{:?}",
+        "{}|{:?}|{:?}|{:?}|{:?}",
         observation.event_at,
         observation.thread_id,
         observation.limit_id,
         observation.plan_type,
-        window.window_kind,
-        window.raw_window_minutes,
-        window.canonical_window_minutes,
-        window.used_percent,
-        window.resets_at
+        observation.windows
     ))
 }
 
@@ -965,14 +1127,24 @@ mod tests {
             limit_id: Some("chatgpt".to_owned()),
             limit_name: Some("ChatGPT".to_owned()),
             plan_type: Some("Plus".to_owned()),
-            windows: vec![super::super::rollout::RateLimitWindowObservation {
-                window_kind: "primary".to_owned(),
-                used_percent: 20.0,
-                raw_window_minutes: Some(299),
-                canonical_window_minutes: Some(300),
-                resets_at: Some(1_000),
-                resets_at_source: "reported".to_owned(),
-            }],
+            windows: vec![
+                super::super::rollout::RateLimitWindowObservation {
+                    window_kind: "primary".to_owned(),
+                    used_percent: 20.0,
+                    raw_window_minutes: Some(299),
+                    canonical_window_minutes: Some(300),
+                    resets_at: Some(1_000),
+                    resets_at_source: "reported".to_owned(),
+                },
+                super::super::rollout::RateLimitWindowObservation {
+                    window_kind: "secondary".to_owned(),
+                    used_percent: 30.0,
+                    raw_window_minutes: Some(10_079),
+                    canonical_window_minutes: Some(10_080),
+                    resets_at: Some(2_000),
+                    resets_at_source: "reported".to_owned(),
+                },
+            ],
         };
         assert!(repository
             .persist_rate_limits(&[observation.clone()])
@@ -982,8 +1154,33 @@ mod tests {
             .persist_rate_limits(&[observation])
             .await
             .unwrap());
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM desktop_rate_limit_observations WHERE source='desktop_rollout'"
+            )
+            .fetch_one(&repository.pool)
+            .await
+            .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM desktop_rate_limit_windows")
+                .fetch_one(&repository.pool)
+                .await
+                .unwrap(),
+            2
+        );
         let snapshot = repository.latest_rate_limits().await.unwrap().unwrap();
-        assert_eq!(snapshot.info.windows[0].window_duration_mins, Some(300));
+        assert!(snapshot
+            .info
+            .windows
+            .iter()
+            .any(|window| window.window_duration_mins == Some(300)));
+        assert!(snapshot
+            .info
+            .windows
+            .iter()
+            .any(|window| window.window_duration_mins == Some(10_080)));
         let history = repository
             .history_for_window(
                 Some("chatgpt"),
@@ -996,5 +1193,141 @@ mod tests {
             .unwrap();
         assert_eq!(history.len(), 1);
         assert_eq!(history[0].used_percent, 20.0);
+    }
+
+    #[tokio::test]
+    async fn rebuild_clears_only_desktop_derived_data_and_sets_revision_two() {
+        let repository = repository().await;
+        let token_counts = counts(100, 50, None, 50, 0, 100);
+        repository
+            .persist_token_event(
+                "rollout-desktop",
+                "thread-desktop",
+                "turn-1",
+                100,
+                &token_counts,
+                &token_counts,
+                None,
+                Some("C:\\Projects\\Demo"),
+                Some("gpt-5.6-luna"),
+                Some("Codex Desktop"),
+                100,
+            )
+            .await
+            .unwrap();
+        repository
+            .persist_rate_limits(&[RateLimitObservation {
+                event_at: 100,
+                thread_id: Some("thread-desktop".to_owned()),
+                limit_id: Some("codex".to_owned()),
+                limit_name: None,
+                plan_type: Some("plus".to_owned()),
+                windows: vec![super::super::rollout::RateLimitWindowObservation {
+                    window_kind: "primary".to_owned(),
+                    used_percent: 20.0,
+                    raw_window_minutes: Some(300),
+                    canonical_window_minutes: Some(300),
+                    resets_at: None,
+                    resets_at_source: "reported".to_owned(),
+                }],
+            }])
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO settings(key, value, updated_at) VALUES ('keep', 'yes', 1)")
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+        sqlx::query("INSERT INTO rate_limit_snapshots(captured_at, fingerprint, source) VALUES (1, 'official-1', 'official')")
+            .execute(&repository.pool)
+            .await
+            .unwrap();
+
+        repository.rebuild_desktop_index().await.unwrap();
+
+        assert_eq!(repository.desktop_index_revision().await.unwrap(), Some(2));
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM thread_token_snapshots WHERE source='desktop_rollout'"
+            )
+            .fetch_one(&repository.pool)
+            .await
+            .unwrap(),
+            0
+        );
+        assert_eq!(sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM desktop_rate_limit_observations WHERE source='desktop_rollout'").fetch_one(&repository.pool).await.unwrap(), 0);
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM settings WHERE key='keep'")
+                .fetch_one(&repository.pool)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(
+            sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM rate_limit_snapshots WHERE source='official'"
+            )
+            .fetch_one(&repository.pool)
+            .await
+            .unwrap(),
+            1
+        );
+    }
+
+    #[tokio::test]
+    async fn reconciliation_compares_rollout_final_total_with_state_tokens_used() {
+        let repository = repository().await;
+        let token_counts = counts(100, 50, None, 50, 0, 100);
+        repository
+            .persist_token_event(
+                "rollout-a",
+                "thread-a",
+                "turn-a",
+                100,
+                &token_counts,
+                &token_counts,
+                None,
+                Some("C:\\Projects\\Demo"),
+                Some("gpt-5.6-luna"),
+                Some("Codex Desktop"),
+                100,
+            )
+            .await
+            .unwrap();
+        let result = repository
+            .reconcile_state_threads(&[
+                ("thread-a".to_owned(), Some(100)),
+                ("thread-b".to_owned(), Some(10)),
+                ("thread-c".to_owned(), None),
+            ])
+            .await
+            .unwrap();
+        assert_eq!(result.checked, 2);
+        assert_eq!(result.matched, 1);
+        assert_eq!(result.mismatched, 1);
+    }
+
+    #[tokio::test]
+    async fn first_stale_last_usage_is_baseline_only() {
+        let repository = repository().await;
+        let total = counts(100, 50, None, 50, 0, 100);
+        let stale_last = counts(20, 10, None, 10, 0, 20);
+        let result = repository
+            .persist_token_event(
+                "rollout-stale",
+                "thread-stale",
+                "turn-stale",
+                100,
+                &total,
+                &stale_last,
+                None,
+                Some("C:\\Projects\\Demo"),
+                Some("gpt-5.6-luna"),
+                Some("Codex Desktop"),
+                100,
+            )
+            .await
+            .unwrap();
+        assert!(result.baseline_only);
+        assert!(!result.delta_event);
     }
 }

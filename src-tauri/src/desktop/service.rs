@@ -19,7 +19,7 @@ use super::{
         DesktopDataStatus, DesktopEnvironmentInfo, DesktopMonitorStatus, DesktopThreadUsageInfo,
         DesktopThreadUsageStatus, DesktopUsageActivity,
     },
-    repository::{CursorRecord, DesktopRepository},
+    repository::{CursorRecord, DesktopRepository, DesktopTokenEvent},
     rollout::{read_rollout, RolloutEvent, SessionMeta, TurnContext},
     state_db::StateDbReader,
 };
@@ -41,6 +41,17 @@ struct TurnState {
     turn_id: Option<String>,
     model: Option<String>,
     cwd: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct RolloutCandidate {
+    path: PathBuf,
+    canonical_thread_id: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct KnownRollout {
+    canonical_thread_id: Option<String>,
 }
 
 pub(crate) struct DesktopRateLimitService {
@@ -100,8 +111,9 @@ pub(crate) struct DesktopService {
     repository: Arc<DesktopRepository>,
     rate_limit_service: Arc<DesktopRateLimitService>,
     status: RwLock<DesktopMonitorStatus>,
-    known_files: Mutex<HashMap<PathBuf, (u64, Option<i64>)>>,
+    known_files: Mutex<HashMap<PathBuf, KnownRollout>>,
     last_discovery: Mutex<Option<Instant>>,
+    raw_rate_limit_events: Mutex<usize>,
     scan_lock: Mutex<()>,
     task: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
@@ -122,6 +134,12 @@ impl DesktopService {
                 desktop_token_events: 0,
                 delta_events: 0,
                 baseline_only_events: 0,
+                raw_rate_limit_events: 0,
+                parsed_rate_limit_observations: 0,
+                reconciliation_checked: 0,
+                reconciliation_matched: 0,
+                reconciliation_mismatched: 0,
+                index_revision: 0,
                 last_scan_at: None,
                 last_desktop_event_at: None,
                 backfill_complete: false,
@@ -132,6 +150,7 @@ impl DesktopService {
             }),
             known_files: Mutex::new(HashMap::new()),
             last_discovery: Mutex::new(None),
+            raw_rate_limit_events: Mutex::new(0),
             scan_lock: Mutex::new(()),
             task: Mutex::new(None),
         })
@@ -166,6 +185,18 @@ impl DesktopService {
     }
 
     pub(crate) async fn refresh(&self) -> Result<DesktopMonitorStatus, AppError> {
+        self.scan_once(true).await;
+        Ok(self.status().await)
+    }
+
+    pub(crate) async fn rebuild(&self) -> Result<DesktopMonitorStatus, AppError> {
+        {
+            let _scan_guard = self.scan_lock.lock().await;
+            self.repository.rebuild_desktop_index().await?;
+            self.known_files.lock().await.clear();
+            *self.last_discovery.lock().await = None;
+            *self.raw_rate_limit_events.lock().await = 0;
+        }
         self.scan_once(true).await;
         Ok(self.status().await)
     }
@@ -283,6 +314,22 @@ impl DesktopService {
 
     async fn scan_once(&self, force_discovery: bool) {
         let _scan_guard = self.scan_lock.lock().await;
+        match self.repository.desktop_index_revision().await {
+            Ok(Some(revision)) if revision >= 2 => {}
+            Ok(_) => {
+                if let Err(error) = self.repository.rebuild_desktop_index().await {
+                    log::warn!("Desktop derived index rebuild failed: {error}");
+                    return;
+                }
+                self.known_files.lock().await.clear();
+                *self.last_discovery.lock().await = None;
+                *self.raw_rate_limit_events.lock().await = 0;
+            }
+            Err(error) => {
+                log::warn!("Desktop index revision check failed: {error}");
+                return;
+            }
+        }
         let mut environment = discover_environment().await;
         let Some(paths) = discover_paths() else {
             let mut state = self.status.write().await;
@@ -291,17 +338,23 @@ impl DesktopService {
             return;
         };
 
-        let mut rollout_paths = Vec::new();
+        let mut rollout_candidates = Vec::new();
+        let mut state_threads = Vec::new();
         let mut state_compatible = false;
         if let Some(state_path) = paths.state_database_path.as_ref() {
             match StateDbReader::open(state_path, &paths.codex_home).await {
                 Ok(reader) => {
                     state_compatible = reader.schema.compatible;
                     if let Ok(threads) = reader.threads(MAX_ROLLOUT_FILES).await {
-                        rollout_paths.extend(threads.into_iter().filter_map(|thread| {
-                            thread
-                                .rollout_path
-                                .map(|path| reader.resolve_rollout_path(&path))
+                        state_threads = threads
+                            .iter()
+                            .map(|thread| (thread.id.clone(), thread.tokens_used))
+                            .collect();
+                        rollout_candidates.extend(threads.into_iter().filter_map(|thread| {
+                            thread.rollout_path.map(|path| RolloutCandidate {
+                                path: reader.resolve_rollout_path(&path),
+                                canonical_thread_id: Some(thread.id),
+                            })
                         }));
                     }
                 }
@@ -319,28 +372,47 @@ impl DesktopService {
         let mut truncated = false;
         if should_discover {
             let (mut discovered, was_truncated) = discover_rollouts(&paths.sessions_path);
-            rollout_paths.append(&mut discovered);
+            rollout_candidates.append(&mut discovered);
             truncated = was_truncated;
             *self.last_discovery.lock().await = Some(Instant::now());
         }
-        rollout_paths.sort();
-        rollout_paths.dedup();
-        if rollout_paths.len() > MAX_ROLLOUT_FILES {
-            rollout_paths.truncate(MAX_ROLLOUT_FILES);
+        let mut candidates_by_path = HashMap::<PathBuf, Option<String>>::new();
+        for candidate in rollout_candidates {
+            candidates_by_path
+                .entry(candidate.path)
+                .and_modify(|thread_id| {
+                    if thread_id.is_none() {
+                        *thread_id = candidate.canonical_thread_id.clone();
+                    }
+                })
+                .or_insert(candidate.canonical_thread_id);
+        }
+        let mut rollout_candidates = candidates_by_path
+            .into_iter()
+            .map(|(path, canonical_thread_id)| RolloutCandidate {
+                path,
+                canonical_thread_id,
+            })
+            .collect::<Vec<_>>();
+        rollout_candidates.sort_by(|left, right| left.path.cmp(&right.path));
+        if rollout_candidates.len() > MAX_ROLLOUT_FILES {
+            rollout_candidates.truncate(MAX_ROLLOUT_FILES);
             truncated = true;
         }
         {
             let mut known = self.known_files.lock().await;
-            for path in &rollout_paths {
-                if let Ok(metadata) = std::fs::metadata(path) {
-                    let modified = metadata
-                        .modified()
-                        .ok()
-                        .and_then(|value| value.duration_since(std::time::UNIX_EPOCH).ok())
-                        .and_then(|value| i64::try_from(value.as_secs()).ok());
+            for candidate in &rollout_candidates {
+                if std::fs::metadata(&candidate.path).is_ok() {
                     known
-                        .entry(path.clone())
-                        .or_insert((metadata.len(), modified));
+                        .entry(candidate.path.clone())
+                        .and_modify(|entry| {
+                            if entry.canonical_thread_id.is_none() {
+                                entry.canonical_thread_id = candidate.canonical_thread_id.clone();
+                            }
+                        })
+                        .or_insert(KnownRollout {
+                            canonical_thread_id: candidate.canonical_thread_id.clone(),
+                        });
                 }
             }
         }
@@ -348,20 +420,24 @@ impl DesktopService {
             .known_files
             .lock()
             .await
-            .keys()
-            .cloned()
+            .iter()
+            .map(|(path, known)| (path.clone(), known.canonical_thread_id.clone()))
             .collect::<Vec<_>>();
+        environment.status = DesktopDataStatus::Indexing;
+        environment.state_db_compatible = state_compatible;
         {
             let mut state = self.status.write().await;
-            state.environment.status = DesktopDataStatus::Indexing;
-            state.environment.state_db_compatible = state_compatible;
+            state.environment = environment.clone();
             state.backfill_total = candidates.len();
             state.backfill_truncated = truncated;
             state.message = format!("正在索引桌面版历史记录（{} 个会话）", candidates.len());
         }
         let mut indexed = 0;
-        for path in candidates {
-            if let Err(error) = self.process_rollout(&path).await {
+        for (path, canonical_thread_id) in candidates {
+            if let Err(error) = self
+                .process_rollout(&path, canonical_thread_id.as_deref())
+                .await
+            {
                 log::debug!(
                     "Desktop rollout skipped (path only): {}: {error}",
                     path.display()
@@ -371,25 +447,48 @@ impl DesktopService {
             let mut state = self.status.write().await;
             state.backfill_indexed = indexed;
         }
+        let reconciliation = self
+            .repository
+            .reconcile_state_threads(&state_threads)
+            .await
+            .unwrap_or_default();
         if let Ok(counts) = self.repository.counts().await {
+            environment.status = DesktopDataStatus::Ready;
+            environment.last_activity_at = counts.latest_event_at;
+            let index_revision = self
+                .repository
+                .desktop_index_revision()
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(2);
+            let raw_rate_limit_events = counts.parsed_rate_limit_observations;
             let mut state = self.status.write().await;
-            state.environment.status = DesktopDataStatus::Ready;
-            state.environment.last_activity_at = counts.latest_event_at;
+            state.environment = environment.clone();
             state.indexed_desktop_sessions = counts.indexed_sessions;
             state.tracked_rollouts = counts.tracked_rollouts;
             state.desktop_token_events = counts.token_events;
             state.delta_events = counts.delta_events;
             state.baseline_only_events = counts.baseline_only_events;
+            state.raw_rate_limit_events = raw_rate_limit_events;
+            state.parsed_rate_limit_observations = counts.parsed_rate_limit_observations;
+            state.reconciliation_checked = reconciliation.checked;
+            state.reconciliation_matched = reconciliation.matched;
+            state.reconciliation_mismatched = reconciliation.mismatched;
+            state.index_revision = index_revision;
             state.last_scan_at = Some(now());
             state.last_desktop_event_at = counts.latest_event_at;
             state.backfill_complete = true;
             state.message = "桌面版数据源已就绪。".to_owned();
         }
         let _ = self.rate_limit_service.refresh_from_store().await;
-        environment.status = DesktopDataStatus::Ready;
     }
 
-    async fn process_rollout(&self, path: &Path) -> Result<(), AppError> {
+    async fn process_rollout(
+        &self,
+        path: &Path,
+        canonical_thread_id: Option<&str>,
+    ) -> Result<(), AppError> {
         let path_key = path.to_string_lossy().into_owned();
         let old = self.repository.cursor(&path_key).await?;
         let result = read_rollout(path, old.byte_offset)?;
@@ -397,7 +496,9 @@ impl DesktopService {
             return Ok(());
         }
         let mut session = SessionContext {
-            thread_id: old.thread_id.clone(),
+            thread_id: canonical_thread_id
+                .map(ToOwned::to_owned)
+                .or(old.thread_id.clone()),
             originator: old.originator.clone(),
             ..SessionContext::default()
         };
@@ -413,9 +514,13 @@ impl DesktopService {
         }
         let mut last_event_at = old.last_event_at;
         let mut rate_limit_changed = false;
+        let mut token_events = Vec::new();
+        let mut rate_observations = Vec::new();
         for event in &result.events {
             match event {
-                RolloutEvent::SessionMeta(meta) => apply_session_meta(&mut session, meta),
+                RolloutEvent::SessionMeta(meta) => {
+                    apply_session_meta(&mut session, meta, canonical_thread_id)
+                }
                 RolloutEvent::TurnContext(context) => apply_turn_context(&mut turn, context),
                 RolloutEvent::TokenCount {
                     event_at,
@@ -432,50 +537,55 @@ impl DesktopService {
                     if !is_desktop {
                         continue;
                     }
-                    let Some(thread_id) = session.thread_id.as_deref() else {
-                        continue;
-                    };
-                    let event_at = (*event_at > 0)
-                        .then_some(*event_at)
+                    let event_at = (*event_at)
                         .or(last_event_at)
+                        .or(result.modified_at)
                         .unwrap_or_else(now);
                     let turn_id = turn_id
                         .as_deref()
                         .or(turn.turn_id.as_deref())
                         .unwrap_or("unknown-turn");
                     let cwd = turn.cwd.as_deref().or(session.cwd.as_deref());
-                    self.repository
-                        .upsert_thread(
-                            thread_id,
-                            cwd,
-                            turn.model.as_deref(),
-                            session.cli_version.as_deref(),
-                            session.originator.as_deref(),
-                            event_at,
-                        )
-                        .await?;
-                    self.repository
-                        .persist_token_event(
-                            &path_key,
-                            thread_id,
-                            turn_id,
-                            event_at,
-                            total,
-                            last,
-                            *model_context_window,
-                            cwd,
-                            turn.model.as_deref(),
-                            session.originator.as_deref(),
-                            result.next_offset,
-                        )
-                        .await?;
+                    if let Some(thread_id) = session.thread_id.as_deref() {
+                        if let Some(total) = total {
+                            token_events.push(DesktopTokenEvent {
+                                rollout_path: path_key.clone(),
+                                thread_id: thread_id.to_owned(),
+                                turn_id: turn_id.to_owned(),
+                                observed_at: event_at,
+                                total: total.clone(),
+                                last: last.clone(),
+                                model_context_window: *model_context_window,
+                                cwd: cwd.map(ToOwned::to_owned),
+                                model: turn.model.clone(),
+                                originator: session.originator.clone(),
+                                byte_offset: result.next_offset,
+                            });
+                        }
+                    }
                     if !rate_limits.is_empty() {
-                        rate_limit_changed |=
-                            self.repository.persist_rate_limits(rate_limits).await?;
+                        *self.raw_rate_limit_events.lock().await += 1;
+                        let mut observations = rate_limits.clone();
+                        for observation in &mut observations {
+                            if observation.event_at <= 0 {
+                                observation.event_at = event_at;
+                            }
+                            if observation.thread_id.is_none() {
+                                observation.thread_id = session.thread_id.clone();
+                            }
+                        }
+                        rate_observations.extend(observations);
                     }
                     last_event_at = Some(event_at);
                 }
             }
+        }
+        self.repository.persist_token_events(&token_events).await?;
+        if !rate_observations.is_empty() {
+            rate_limit_changed |= self
+                .repository
+                .persist_rate_limits(&rate_observations)
+                .await?;
         }
         let is_desktop = session
             .originator
@@ -500,6 +610,12 @@ impl DesktopService {
                 result.parse_errors
             );
         }
+        if result.timestamp_errors > 0 {
+            log::debug!(
+                "rollout timestamp parse errors: path={path_key} count={}",
+                result.timestamp_errors
+            );
+        }
         if rate_limit_changed {
             self.rate_limit_service.refresh_from_store().await;
         }
@@ -507,8 +623,14 @@ impl DesktopService {
     }
 }
 
-fn apply_session_meta(session: &mut SessionContext, meta: &SessionMeta) {
-    session.thread_id = meta.thread_id.clone().or(session.thread_id.clone());
+fn apply_session_meta(
+    session: &mut SessionContext,
+    meta: &SessionMeta,
+    canonical_thread_id: Option<&str>,
+) {
+    if canonical_thread_id.is_none() {
+        session.thread_id = meta.thread_id.clone().or(session.thread_id.clone());
+    }
     session.originator = meta.originator.clone().or(session.originator.clone());
     session.cli_version = meta.cli_version.clone().or(session.cli_version.clone());
     session.cwd = meta.cwd.clone().or(session.cwd.clone());
@@ -525,7 +647,7 @@ pub(crate) fn is_desktop_originator(originator: &str) -> bool {
     )
 }
 
-fn discover_rollouts(sessions: &Path) -> (Vec<PathBuf>, bool) {
+fn discover_rollouts(sessions: &Path) -> (Vec<RolloutCandidate>, bool) {
     let mut paths = Vec::new();
     collect_rollouts(sessions, &mut paths);
     paths.sort_by_key(|path| {
@@ -538,7 +660,16 @@ fn discover_rollouts(sessions: &Path) -> (Vec<PathBuf>, bool) {
     if truncated {
         paths.truncate(MAX_ROLLOUT_FILES);
     }
-    (paths, truncated)
+    (
+        paths
+            .into_iter()
+            .map(|path| RolloutCandidate {
+                canonical_thread_id: extract_thread_id_from_filename(&path),
+                path,
+            })
+            .collect(),
+        truncated,
+    )
 }
 fn collect_rollouts(path: &Path, paths: &mut Vec<PathBuf>) {
     let Ok(entries) = std::fs::read_dir(path) else {
@@ -556,6 +687,18 @@ fn collect_rollouts(path: &Path, paths: &mut Vec<PathBuf>) {
             paths.push(path);
         }
     }
+}
+
+fn extract_thread_id_from_filename(path: &Path) -> Option<String> {
+    let stem = path.file_stem()?.to_str()?;
+    let parts = stem.split('-').collect::<Vec<_>>();
+    parts.windows(5).find_map(|parts| {
+        let lengths = [8, 4, 4, 4, 12];
+        (parts.iter().zip(lengths).all(|(part, length)| {
+            part.len() == length && part.chars().all(|character| character.is_ascii_hexdigit())
+        }))
+        .then(|| parts.join("-"))
+    })
 }
 fn unavailable_environment(message: &str) -> DesktopEnvironmentInfo {
     DesktopEnvironmentInfo {
@@ -595,4 +738,60 @@ fn now() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|value| value.as_secs() as i64)
         .unwrap_or(0)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn fallback_rollout_filename_extracts_uuid_identity() {
+        let path = Path::new(
+            "rollout-2026-08-18T04-46-07-000000Z-12345678-1234-abcd-ef01-1234567890ab.jsonl",
+        );
+        assert_eq!(
+            extract_thread_id_from_filename(path).as_deref(),
+            Some("12345678-1234-abcd-ef01-1234567890ab")
+        );
+    }
+
+    #[test]
+    fn canonical_thread_id_protects_against_fork_session_metadata() {
+        let mut session = SessionContext {
+            thread_id: Some("thread-B".to_owned()),
+            ..SessionContext::default()
+        };
+        apply_session_meta(
+            &mut session,
+            &SessionMeta {
+                thread_id: Some("thread-A".to_owned()),
+                cwd: Some("C:\\Projects\\Demo".to_owned()),
+                ..SessionMeta::default()
+            },
+            Some("thread-B"),
+        );
+        assert_eq!(session.thread_id.as_deref(), Some("thread-B"));
+        assert_eq!(session.cwd.as_deref(), Some("C:\\Projects\\Demo"));
+    }
+
+    #[test]
+    fn session_metadata_can_define_identity_when_no_canonical_thread_exists() {
+        let mut session = SessionContext::default();
+        apply_session_meta(
+            &mut session,
+            &SessionMeta {
+                thread_id: Some("thread-A".to_owned()),
+                ..SessionMeta::default()
+            },
+            None,
+        );
+        assert_eq!(session.thread_id.as_deref(), Some("thread-A"));
+    }
+
+    #[test]
+    fn desktop_originator_matching_is_case_insensitive_and_narrow() {
+        assert!(is_desktop_originator("Codex Desktop"));
+        assert!(is_desktop_originator("CHATGPT DESKTOP"));
+        assert!(!is_desktop_originator("Codex CLI"));
+    }
 }
