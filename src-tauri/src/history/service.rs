@@ -11,7 +11,7 @@ use super::model::{
 };
 
 const MAX_HISTORY_POINTS: usize = 2_000;
-const COVERAGE: &str = "Codex Desktop local rollouts";
+const COVERAGE: &str = "Codex 桌面版本地会话";
 
 pub(crate) struct HistoryService {
     rate_limit_repository: Arc<DesktopRepository>,

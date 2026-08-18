@@ -31,8 +31,8 @@ class AppErrorBoundary extends Component<PropsWithChildren, ErrorBoundaryState> 
       return (
         <div className="app-error-boundary">
           <ErrorState
-            title="The application could not render"
-            message={this.state.message || "An unexpected UI error occurred."}
+            title="应用无法显示"
+            message={this.state.message || "发生了未预期的界面错误。"}
           />
         </div>
       );

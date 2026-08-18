@@ -1,7 +1,7 @@
 [package]
 name = "codex-usage-monitor"
 version = "0.1.0"
-description = "Windows desktop monitor for Codex usage, rate limits, token activity, and history"
+description = "Windows Codex 用量、额度、Token 活动与历史记录监控器"
 authors = []
 edition = "2021"
 

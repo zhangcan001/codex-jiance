@@ -79,7 +79,7 @@ impl SettingsService {
                 settings: AppSettings::default(),
                 autostart_registered: None,
                 autostart_available: false,
-                message: Some("Settings state is unavailable; defaults are active.".to_owned()),
+                message: Some("设置状态不可用；当前使用默认设置。".to_owned()),
             })
     }
 
@@ -98,9 +98,10 @@ impl SettingsService {
         let mut message = current.message.clone();
 
         if settings.start_with_windows != current.settings.start_with_windows {
-            let backend = self.autostart.as_ref().ok_or_else(|| {
-                AppError::Settings("Windows startup registration is unavailable.".to_owned())
-            })?;
+            let backend = self
+                .autostart
+                .as_ref()
+                .ok_or_else(|| AppError::Settings("Windows 开机启动注册不可用。".to_owned()))?;
             if settings.start_with_windows {
                 backend.enable().map_err(AppError::Settings)?;
             } else {
@@ -109,7 +110,7 @@ impl SettingsService {
             let actual = backend.is_enabled().map_err(AppError::Settings)?;
             if actual != settings.start_with_windows {
                 return Err(AppError::Settings(
-                    "Windows startup registration did not match the requested state.".to_owned(),
+                    "Windows 开机启动注册状态与请求不一致。".to_owned(),
                 ));
             }
             autostart_registered = Some(actual);
@@ -143,7 +144,7 @@ impl SettingsService {
         let mut snapshot = self
             .snapshot
             .write()
-            .map_err(|_| AppError::Settings("Settings state is unavailable.".to_owned()))?;
+            .map_err(|_| AppError::Settings("设置状态不可用。".to_owned()))?;
         *snapshot = next.clone();
         Ok(next)
     }
@@ -163,7 +164,7 @@ async fn load_settings(pool: &SqlitePool) -> Result<(AppSettings, Option<String>
             log::warn!("Saved application settings are invalid; using defaults");
             Ok((
                 AppSettings::default(),
-                Some("Saved settings were invalid; defaults are active.".to_owned()),
+                Some("已保存的设置无效；当前使用默认设置。".to_owned()),
             ))
         }
     }
@@ -187,8 +188,7 @@ fn sync_autostart(
                 };
                 if let Err(error) = result {
                     available = false;
-                    message =
-                        append_message(message, format!("Windows startup sync failed: {error}"));
+                    message = append_message(message, format!("Windows 开机启动同步失败：{error}"));
                 } else {
                     match backend.is_enabled() {
                         Ok(verified) if verified == settings.start_with_windows => {
@@ -199,15 +199,14 @@ fn sync_autostart(
                             registered = Some(verified);
                             message = append_message(
                                 message,
-                                "Windows startup sync could not verify the requested state."
-                                    .to_owned(),
+                                "Windows 开机启动同步无法验证请求的状态。".to_owned(),
                             );
                         }
                         Err(error) => {
                             available = false;
                             message = append_message(
                                 message,
-                                format!("Windows startup verification failed: {error}"),
+                                format!("Windows 开机启动验证失败：{error}"),
                             );
                         }
                     }
@@ -216,10 +215,7 @@ fn sync_autostart(
         }
         Err(error) => {
             available = false;
-            message = append_message(
-                message,
-                format!("Windows startup status unavailable: {error}"),
-            );
+            message = append_message(message, format!("Windows 开机启动状态不可用：{error}"));
         }
     }
     AppSettingsSnapshot {

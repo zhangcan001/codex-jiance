@@ -70,20 +70,19 @@ pub(crate) fn calculate_prediction(
 ) -> QuotaPrediction {
     let mut prediction = base_prediction(window, calculated_at);
     if window.limit_id.is_none() || !window.used_percent.is_finite() {
-        prediction.message =
-            Some("Official rate-limit identity or usage is unavailable.".to_owned());
+        prediction.message = Some("官方额度标识或用量不可用。".to_owned());
         return prediction;
     }
 
     prediction.used_percent = Some(window.used_percent);
     if window.used_percent >= 100.0 {
         prediction.outcome = QuotaPredictionOutcome::AlreadyDepleted;
-        prediction.message = Some("Quota currently exhausted".to_owned());
+        prediction.message = Some("额度已耗尽。".to_owned());
         return prediction;
     }
 
     let Some(burn_rate) = burn_rate else {
-        prediction.message = Some("Insufficient data".to_owned());
+        prediction.message = Some("数据不足。".to_owned());
         return prediction;
     };
     if burn_rate.status != BurnRateStatus::Available {
@@ -93,17 +92,17 @@ pub(crate) fn calculate_prediction(
             BurnRateStatus::InsufficientData => QuotaPredictionOutcome::InsufficientData,
             BurnRateStatus::Available => QuotaPredictionOutcome::InsufficientData,
         };
-        prediction.message = Some("Insufficient data".to_owned());
+        prediction.message = Some("数据不足。".to_owned());
         return prediction;
     }
 
     let Some(burn_rate_value) = burn_rate.burn_rate_percent_points_per_hour else {
-        prediction.message = Some("Insufficient data".to_owned());
+        prediction.message = Some("数据不足。".to_owned());
         return prediction;
     };
     if !burn_rate_value.is_finite() {
         prediction.outcome = QuotaPredictionOutcome::Error;
-        prediction.message = Some("Burn rate is not finite.".to_owned());
+        prediction.message = Some("消耗速率不是有限值。".to_owned());
         return prediction;
     }
 
@@ -111,7 +110,7 @@ pub(crate) fn calculate_prediction(
     prediction.confidence = confidence_for(burn_rate);
     if burn_rate_value <= STABLE_BURN_RATE {
         prediction.outcome = QuotaPredictionOutcome::Stable;
-        prediction.message = Some("No depletion projected from current burn".to_owned());
+        prediction.message = Some("按当前消耗速度预计不会耗尽。".to_owned());
         return prediction;
     }
 
@@ -119,7 +118,7 @@ pub(crate) fn calculate_prediction(
     let seconds_to_depletion = remaining / burn_rate_value * 3600.0;
     if !seconds_to_depletion.is_finite() || seconds_to_depletion < 0.0 {
         prediction.outcome = QuotaPredictionOutcome::Error;
-        prediction.message = Some("Depletion estimate is not finite.".to_owned());
+        prediction.message = Some("耗尽时间估算不是有限值。".to_owned());
         return prediction;
     }
 
@@ -135,10 +134,10 @@ pub(crate) fn calculate_prediction(
     };
     prediction.message = Some(
         match prediction.outcome {
-            QuotaPredictionOutcome::DepletionBeforeReset => "Estimated depletion before reset",
-            QuotaPredictionOutcome::ResetBeforeDepletion => "Reset likely before depletion",
-            QuotaPredictionOutcome::ResetUnknown => "Reset time is unknown",
-            _ => "Insufficient data",
+            QuotaPredictionOutcome::DepletionBeforeReset => "预计在重置前耗尽",
+            QuotaPredictionOutcome::ResetBeforeDepletion => "预计会先于耗尽完成重置",
+            QuotaPredictionOutcome::ResetUnknown => "重置时间未知",
+            _ => "数据不足",
         }
         .to_owned(),
     );

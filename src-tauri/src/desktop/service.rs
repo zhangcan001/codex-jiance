@@ -74,10 +74,8 @@ impl DesktopRateLimitService {
                 *self.cache.write().await = Some(info.clone());
                 info
             }
-            Ok(None) => unavailable_rate_limits("No Desktop rate-limit observation yet."),
-            Err(error) => {
-                error_rate_limits(&format!("Could not read Desktop rate limits: {error}"))
-            }
+            Ok(None) => unavailable_rate_limits("尚未观测到桌面版额度数据。"),
+            Err(error) => error_rate_limits(&format!("无法读取桌面版额度：{error}")),
         }
     }
 
@@ -113,7 +111,7 @@ impl DesktopService {
         repository: Arc<DesktopRepository>,
         rate_limit_service: Arc<DesktopRateLimitService>,
     ) -> Arc<Self> {
-        let environment = unavailable_environment("Desktop data source has not been scanned yet.");
+        let environment = unavailable_environment("桌面版数据源尚未扫描。");
         Arc::new(Self {
             repository,
             rate_limit_service,
@@ -130,7 +128,7 @@ impl DesktopService {
                 backfill_truncated: false,
                 backfill_indexed: 0,
                 backfill_total: 0,
-                message: "Indexing Desktop history".to_owned(),
+                message: "正在索引桌面版历史记录".to_owned(),
             }),
             known_files: Mutex::new(HashMap::new()),
             last_discovery: Mutex::new(None),
@@ -195,7 +193,7 @@ impl DesktopService {
                     longest_streak_days: None,
                 }),
                 daily_buckets: vec![DailyUsageBucket {
-                    start_date: "Today".to_owned(),
+                    start_date: "今天".to_owned(),
                     tokens: activity.today_tokens,
                 }],
                 updated_at: self
@@ -206,7 +204,7 @@ impl DesktopService {
                     .and_then(|counts| counts.latest_event_at)
                     .unwrap_or_else(now),
                 message: (activity.total_events == 0)
-                    .then(|| "No Desktop token deltas observed yet.".to_owned()),
+                    .then(|| "尚未观测到桌面版 Token 增量。".to_owned()),
             },
             Err(error) => CodexUsageInfo {
                 status: UsageStatus::Error,
@@ -244,8 +242,7 @@ impl DesktopService {
             last_desktop_activity: self.repository.counts().await?.latest_event_at,
             pricing_coverage_percent: coverage,
             api_equivalent_cost_usd: totals.api_equivalent_cost_usd,
-            message: (totals.total_events == 0)
-                .then(|| "No Desktop token deltas observed yet.".to_owned()),
+            message: (totals.total_events == 0).then(|| "尚未观测到桌面版 Token 增量。".to_owned()),
         })
     }
 
@@ -257,7 +254,7 @@ impl DesktopService {
                 } else {
                     DesktopThreadUsageStatus::Observing
                 },
-                coverage: "Codex Desktop local rollouts".to_owned(),
+                coverage: "Codex 桌面版本地会话".to_owned(),
                 inventory_thread_count: counts.indexed_sessions,
                 inventory_truncated: self.status.read().await.backfill_truncated,
                 observed_thread_count: counts.indexed_sessions,
@@ -265,14 +262,14 @@ impl DesktopService {
                 latest_observed_at: counts.latest_event_at,
                 coverage_gap_detected: false,
                 message: if counts.tracked_rollouts == 0 {
-                    "No Desktop rollouts indexed yet.".to_owned()
+                    "尚未索引桌面版会话。".to_owned()
                 } else {
-                    format!("Indexed {} Desktop rollout(s)", counts.tracked_rollouts)
+                    format!("已索引 {} 个桌面版会话", counts.tracked_rollouts)
                 },
             },
             Err(error) => DesktopThreadUsageInfo {
                 status: DesktopThreadUsageStatus::Error,
-                coverage: "Codex Desktop local rollouts".to_owned(),
+                coverage: "Codex 桌面版本地会话".to_owned(),
                 inventory_thread_count: 0,
                 inventory_truncated: false,
                 observed_thread_count: 0,
@@ -290,7 +287,7 @@ impl DesktopService {
         let Some(paths) = discover_paths() else {
             let mut state = self.status.write().await;
             state.environment = environment;
-            state.message = "Codex Desktop local data not found.".to_owned();
+            state.message = "未找到 Codex 桌面版本地数据。".to_owned();
             return;
         };
 
@@ -360,7 +357,7 @@ impl DesktopService {
             state.environment.state_db_compatible = state_compatible;
             state.backfill_total = candidates.len();
             state.backfill_truncated = truncated;
-            state.message = format!("Indexing Desktop history ({} sessions)", candidates.len());
+            state.message = format!("正在索引桌面版历史记录（{} 个会话）", candidates.len());
         }
         let mut indexed = 0;
         for path in candidates {
@@ -386,7 +383,7 @@ impl DesktopService {
             state.last_scan_at = Some(now());
             state.last_desktop_event_at = counts.latest_event_at;
             state.backfill_complete = true;
-            state.message = "Desktop data source ready.".to_owned();
+            state.message = "桌面版数据源已就绪。".to_owned();
         }
         let _ = self.rate_limit_service.refresh_from_store().await;
         environment.status = DesktopDataStatus::Ready;

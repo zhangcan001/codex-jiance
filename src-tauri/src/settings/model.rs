@@ -39,10 +39,10 @@ impl AppSettings {
             || self.high_threshold >= self.critical_threshold
             || self.critical_threshold >= 100
         {
-            return Err("Thresholds must satisfy 1 <= warning < high < critical < 100.".to_owned());
+            return Err("阈值必须满足 1 <= 提醒阈值 < 高风险阈值 < 严重阈值 < 100。".to_owned());
         }
         if !(5..=240).contains(&self.prediction_alert_minutes) {
-            return Err("Prediction alert minutes must be between 5 and 240.".to_owned());
+            return Err("预测告警时间必须在 5 至 240 分钟之间。".to_owned());
         }
         Ok(())
     }

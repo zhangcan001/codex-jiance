@@ -3,28 +3,28 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum AppError {
-    #[error("I/O error: {0}")]
+    #[error("I/O 错误：{0}")]
     Io(#[from] std::io::Error),
 
-    #[error("Database error")]
+    #[error("数据库错误")]
     Database(#[from] sqlx::Error),
 
-    #[error("Database migration error")]
+    #[error("数据库迁移错误")]
     Migration(#[from] sqlx::migrate::MigrateError),
 
-    #[error("Serialization error: {0}")]
+    #[error("序列化错误：{0}")]
     Serialization(#[from] serde_json::Error),
 
-    #[error("Tauri error: {0}")]
+    #[error("Tauri 错误：{0}")]
     Tauri(String),
 
-    #[error("Invalid application state: {0}")]
+    #[error("应用状态无效：{0}")]
     InvalidState(String),
 
-    #[error("Process error: {0}")]
+    #[error("进程错误：{0}")]
     Process(String),
 
-    #[error("Process timed out: {0}")]
+    #[error("进程操作超时：{0}")]
     ProcessTimeout(String),
 
     #[cfg(test)]
@@ -59,7 +59,7 @@ pub enum AppError {
     #[error("Account service error: {0}")]
     AccountService(String),
 
-    #[error("Settings error: {0}")]
+    #[error("设置错误：{0}")]
     Settings(String),
 
     #[cfg(test)]
@@ -82,7 +82,7 @@ pub enum AppError {
     #[error("RPC request timed out: {0}")]
     RpcTimeout(String),
 
-    #[error("Unknown application error: {0}")]
+    #[error("未知应用错误：{0}")]
     Unknown(String),
 }
 
@@ -104,19 +104,19 @@ impl From<AppError> for CommandError {
         match error {
             AppError::Io(error) => Self {
                 code: "IO_ERROR".to_owned(),
-                message: format!("File system operation failed: {error}"),
+                message: format!("文件系统操作失败：{error}"),
             },
             AppError::Database(_) => Self {
                 code: "DATABASE_ERROR".to_owned(),
-                message: "Database operation failed.".to_owned(),
+                message: "数据库操作失败。".to_owned(),
             },
             AppError::Migration(_) => Self {
                 code: "DATABASE_ERROR".to_owned(),
-                message: "Database migration failed.".to_owned(),
+                message: "数据库迁移失败。".to_owned(),
             },
             AppError::Serialization(error) => Self {
                 code: "SERIALIZATION_ERROR".to_owned(),
-                message: format!("Response serialization failed: {error}"),
+                message: format!("响应序列化失败：{error}"),
             },
             AppError::Tauri(message) => Self {
                 code: "TAURI_ERROR".to_owned(),

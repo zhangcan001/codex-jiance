@@ -1,21 +1,21 @@
-# Codex Usage Monitor v0.1.0
+# Codex 用量监控器 v0.1.0
 
-Codex Usage Monitor is a Windows desktop monitor for Codex Desktop local activity. This build is the `v0.1.0 Desktop Direct Migration` and remains a Release Candidate until fresh live Desktop acceptance is complete.
+Codex 用量监控器是一个 Windows 桌面监控工具，用于读取 Codex Desktop 的本地活动。本版本完成 `v0.1.0 Desktop Direct` 架构迁移，并在完成新的 Desktop 实机验收前保持为候选版本。
 
-## Architecture
+## 架构
 
-- Reads `%USERPROFILE%\.codex` (or `CODEX_HOME`) directly.
-- Uses the newest `state_*.sqlite` as an optional read-only index.
-- Streams `sessions\YYYY\MM\DD\rollout-*.jsonl` with bounded lines and persistent byte cursors.
-- Uses rollout `session_meta`, `turn_context`, and `token_count` records only.
-- Derives Desktop token deltas, project/model totals, rate-limit observations, burn rates, and pricing coverage.
-- Stores monitor data separately at `%APPDATA%\com.codexusagemonitor.app\codex-usage-monitor.db`.
+- 直接读取 `%USERPROFILE%\.codex`（或 `CODEX_HOME`）。
+- 可选地以只读方式使用最新的 `state_*.sqlite` 作为索引。
+- 读取 `sessions\YYYY\MM\DD\rollout-*.jsonl`，限制单行大小并持久化字节游标。
+- 仅使用 rollout 中的 `session_meta`、`turn_context` 和 `token_count` 记录。
+- 推导 Desktop Token 增量、项目/模型汇总、额度观测、消耗速率和计价覆盖率。
+- 监控数据单独存储在 `%APPDATA%\com.codexusagemonitor.app\codex-usage-monitor.db`。
 
-The monitor does not require the standalone Codex CLI, start another local runtime, call a backend API, read credentials, or create model activity. It does not persist prompts, responses, reasoning text, tool arguments, or rollout JSON lines.
+本工具不要求独立的 Codex CLI，不会启动额外的本地运行时，不会调用后端 API，不会读取凭据，也不会创建模型活动。不会持久化提示词、响应、推理文本、工具参数或 rollout JSONL 原文。
 
-Rate-limit cards are labeled `Official · Desktop observation`; token totals and project/model reports are `Derived`; burn-rate and prediction reports are `Estimated`. An expired local observation is shown as awaiting the next Desktop activity rather than being presented as current.
+额度卡片标记为 `官方 · 桌面版观测`；Token 总量以及项目/模型报表标记为 `推导`；消耗速率和额度预测标记为 `估算`。本地观测过期后会显示为等待下一次 Desktop 活动，不会被当作当前数据。
 
-## Development
+## 开发
 
 ```bash
 npm install
@@ -23,7 +23,7 @@ npm run tauri dev
 npm run build
 ```
 
-Rust checks:
+Rust 检查：
 
 ```bash
 cd src-tauri
@@ -33,8 +33,8 @@ cargo test
 cargo clippy -- -D warnings
 ```
 
-Schema version is v4. The migration is `src-tauri/migrations/0004_desktop_direct.sql`. Do not treat the previous NSIS candidate as the final Desktop Direct installer; build a fresh package after live acceptance.
+Schema 版本为 v4，迁移文件是 `src-tauri/migrations/0004_desktop_direct.sql`。旧版 NSIS 候选包不代表最终 Desktop Direct 安装包；完成实机验收后应重新构建安装包。
 
-## Release status
+## 发布状态
 
-`Codex Usage Monitor v0.1.0 Desktop Direct Migration` — Release Candidate `NOT READY`. No tag or GitHub Release is created by this migration.
+`Codex 用量监控器 v0.1.0 Desktop Direct Migration` 当前为 Release Candidate，状态为 `未就绪（NOT READY）`。本次迁移不创建 Git tag，也不创建 GitHub Release。

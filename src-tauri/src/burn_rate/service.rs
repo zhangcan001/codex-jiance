@@ -81,15 +81,15 @@ pub(crate) fn calculate_burn_rate(
 ) -> BurnRateEstimate {
     let mut estimate = base_estimate(window);
     if window.limit_id.is_none() {
-        estimate.message = Some("Rate limit window has no official limit id.".to_owned());
+        estimate.message = Some("额度窗口缺少官方 limit id。".to_owned());
         return estimate;
     }
     if window.resets_at.is_none() {
-        estimate.message = Some("Rate limit window has no reset timestamp.".to_owned());
+        estimate.message = Some("额度窗口缺少重置时间戳。".to_owned());
         return estimate;
     }
     if !window.used_percent.is_finite() {
-        estimate.message = Some("Official used percent is not finite.".to_owned());
+        estimate.message = Some("官方已用百分比不是有限值。".to_owned());
         return estimate;
     }
 
@@ -119,7 +119,7 @@ pub(crate) fn calculate_burn_rate(
     estimate.last_observed_at = samples.last().map(|sample| sample.captured_at);
 
     if samples.len() < 2 {
-        estimate.message = Some("At least two observations are required.".to_owned());
+        estimate.message = Some("至少需要两条观测记录。".to_owned());
         return estimate;
     }
 
@@ -128,28 +128,28 @@ pub(crate) fn calculate_burn_rate(
     let span = latest.captured_at - first.captured_at;
     estimate.observed_span_sec = Some(span);
     if span < MIN_OBSERVED_SPAN_SEC {
-        estimate.message = Some("Observations must span at least 60 seconds.".to_owned());
+        estimate.message = Some("观测记录至少需要覆盖 60 秒。".to_owned());
         return estimate;
     }
     if span < 0 {
-        estimate.message = Some("Observation timestamps are out of order.".to_owned());
+        estimate.message = Some("观测时间戳顺序无效。".to_owned());
         return estimate;
     }
 
     let used_delta = latest.used_percent - first.used_percent;
     estimate.used_delta_percent = Some(used_delta);
     if !used_delta.is_finite() {
-        estimate.message = Some("Used percent delta is not finite.".to_owned());
+        estimate.message = Some("已用百分比增量不是有限值。".to_owned());
         return estimate;
     }
     if used_delta < 0.0 {
-        estimate.message = Some("Used percent decreased within the reset cycle.".to_owned());
+        estimate.message = Some("当前重置周期内已用百分比出现下降。".to_owned());
         return estimate;
     }
 
     let burn_rate = used_delta / (span as f64 / 3600.0);
     if !burn_rate.is_finite() {
-        estimate.message = Some("Burn rate is not finite.".to_owned());
+        estimate.message = Some("消耗速率不是有限值。".to_owned());
         return estimate;
     }
 
@@ -270,7 +270,7 @@ mod tests {
             calculate_burn_rate(&window(20.0, Some(2_000)), vec![sample(1_000, 30.0)], 1_600,)
                 .message
                 .as_deref(),
-            Some("Used percent decreased within the reset cycle.")
+            Some("当前重置周期内已用百分比出现下降。")
         );
         assert_eq!(
             calculate_burn_rate(&window(20.0, None), vec![sample(1_000, 10.0)], 1_600).status,

@@ -42,7 +42,7 @@ function normalizeTauriError(error: unknown): TauriServiceError {
     const message =
       typeof error.message === "string"
         ? error.message
-        : "The backend command failed.";
+        : "后端命令执行失败。";
     return new TauriServiceError(code, message);
   }
 
@@ -50,7 +50,7 @@ function normalizeTauriError(error: unknown): TauriServiceError {
     return new TauriServiceError("UNKNOWN_ERROR", error.message);
   }
 
-  return new TauriServiceError("UNKNOWN_ERROR", "The backend command failed.");
+  return new TauriServiceError("UNKNOWN_ERROR", "后端命令执行失败。");
 }
 
 async function invokeCommand<T>(command: string, args?: Record<string, unknown>): Promise<T> {

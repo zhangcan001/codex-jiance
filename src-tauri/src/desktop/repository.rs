@@ -289,37 +289,38 @@ impl DesktopRepository {
             ])
         })
         .transpose()?;
-        let (baseline_only, reset_detected, delta) = match previous {
-            None if current == last_values => {
-                let has_tokens = current.iter().any(|value| *value != 0);
-                (false, false, has_tokens.then_some(current))
-            }
-            None => (true, false, None),
-            Some(before)
-                if current
-                    .iter()
-                    .zip(before)
-                    .any(|(now, before)| *now < before) =>
-            {
-                (true, true, None)
-            }
-            Some(before) => {
-                let delta = current
-                    .map(|value| value)
-                    .into_iter()
-                    .zip(before)
-                    .map(|(now, before)| now - before)
-                    .collect::<Vec<_>>();
-                let all_zero = delta.iter().all(|value| *value == 0);
-                (
-                    false,
-                    false,
-                    (!all_zero).then_some(delta.try_into().map_err(|_| {
-                        AppError::InvalidState("Token delta shape is invalid.".to_owned())
-                    })?),
-                )
-            }
-        };
+        let (baseline_only, reset_detected, delta) =
+            match previous {
+                None if current == last_values => {
+                    let has_tokens = current.iter().any(|value| *value != 0);
+                    (false, false, has_tokens.then_some(current))
+                }
+                None => (true, false, None),
+                Some(before)
+                    if current
+                        .iter()
+                        .zip(before)
+                        .any(|(now, before)| *now < before) =>
+                {
+                    (true, true, None)
+                }
+                Some(before) => {
+                    let delta = current
+                        .map(|value| value)
+                        .into_iter()
+                        .zip(before)
+                        .map(|(now, before)| now - before)
+                        .collect::<Vec<_>>();
+                    let all_zero = delta.iter().all(|value| *value == 0);
+                    (
+                        false,
+                        false,
+                        (!all_zero).then_some(delta.try_into().map_err(|_| {
+                            AppError::InvalidState("Token 增量结构无效。".to_owned())
+                        })?),
+                    )
+                }
+            };
         let total_sql = total
             .values()
             .into_iter()
@@ -811,17 +812,17 @@ fn parse_window_kind(value: &str) -> Result<RateLimitWindowKind, AppError> {
         "primary" => Ok(RateLimitWindowKind::Primary),
         "secondary" => Ok(RateLimitWindowKind::Secondary),
         _ => Err(AppError::InvalidState(
-            "Desktop rate-limit window kind is unknown.".to_owned(),
+            "桌面版额度窗口类型未知。".to_owned(),
         )),
     }
 }
 
 fn non_negative_u64(value: i64, field: &str) -> Result<u64, AppError> {
-    u64::try_from(value).map_err(|_| AppError::InvalidState(format!("{field} is negative.")))
+    u64::try_from(value).map_err(|_| AppError::InvalidState(format!("{field} 不能为负数。")))
 }
 fn sqlite_i64(value: u64, field: &str) -> Result<i64, AppError> {
     i64::try_from(value)
-        .map_err(|_| AppError::InvalidState(format!("{field} exceeds SQLite integer range.")))
+        .map_err(|_| AppError::InvalidState(format!("{field} 超出 SQLite 整数范围。")))
 }
 fn now() -> i64 {
     std::time::SystemTime::now()

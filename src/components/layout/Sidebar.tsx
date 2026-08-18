@@ -14,13 +14,13 @@ export function Sidebar({ activeRoute, onNavigate }: SidebarProps) {
           C
         </div>
         <div>
-          <p className="sidebar__eyebrow">Local desktop app</p>
-          <p className="sidebar__title">Codex Usage Monitor</p>
+          <p className="sidebar__eyebrow">桌面版本地应用</p>
+          <p className="sidebar__title">Codex 用量监控器</p>
         </div>
       </div>
 
-      <nav className="sidebar__nav" aria-label="Primary navigation">
-        <p className="sidebar__section-label">Workspace</p>
+      <nav className="sidebar__nav" aria-label="主导航">
+        <p className="sidebar__section-label">工作区</p>
         {navigationItems.map((item) => {
           const isActive = item.enabled && item.route === activeRoute;
           return (
@@ -33,20 +33,20 @@ export function Sidebar({ activeRoute, onNavigate }: SidebarProps) {
                   onNavigate(item.route);
                 }
               }}
-              title={item.enabled ? item.label : "Coming Soon"}
+              title={item.enabled ? item.label : "即将推出"}
               type="button"
             >
               <span className="nav-item__dot" aria-hidden="true" />
               <span>{item.label}</span>
-              {!item.enabled ? <StatusBadge variant="neutral">Soon</StatusBadge> : null}
+              {!item.enabled ? <StatusBadge variant="neutral">即将推出</StatusBadge> : null}
             </button>
           );
         })}
       </nav>
 
       <div className="sidebar__footer">
-        <StatusBadge variant="success">Local only</StatusBadge>
-        <p>Read-only local observations from Codex Desktop.</p>
+        <StatusBadge variant="success">仅本地</StatusBadge>
+        <p>来自 Codex 桌面版的只读本地观测数据。</p>
       </div>
     </aside>
   );

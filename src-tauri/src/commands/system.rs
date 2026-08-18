@@ -8,7 +8,7 @@ use tauri::State;
 #[tauri::command]
 pub fn get_app_info() -> CommandResult<AppInfo> {
     Ok(AppInfo {
-        name: "Codex Usage Monitor".to_owned(),
+        name: "Codex 用量监控器".to_owned(),
         version: env!("CARGO_PKG_VERSION").to_owned(),
         environment: if cfg!(debug_assertions) {
             "development".to_owned()

@@ -292,7 +292,7 @@ impl AlertService {
                 .is_ok_and(|permission| permission == NotificationPermission::Granted);
         for (alert, should_notify, deferred_cycle) in pending_notifications {
             if should_notify && notifications_enabled {
-                match self.notifier.notify("Codex Usage Monitor", &alert.message) {
+                match self.notifier.notify("Codex 用量监控器", &alert.message) {
                     Ok(()) => {
                         if let Some(cycle) = deferred_cycle {
                             if let Ok(mut store) = self.store.lock() {
@@ -443,7 +443,7 @@ fn threshold_alert(
         resets_at: window.resets_at,
         trust_class: "official".to_owned(),
         created_at,
-        message: format!("Official quota usage reached {threshold}%"),
+        message: format!("Codex 额度使用已达到 {threshold}%"),
     }
 }
 
@@ -467,7 +467,7 @@ fn prediction_alert(
         resets_at: window.resets_at,
         trust_class: "estimated".to_owned(),
         created_at,
-        message: "Estimated depletion before reset".to_owned(),
+        message: "按当前消耗速度，额度可能在重置前耗尽".to_owned(),
     }
 }
 

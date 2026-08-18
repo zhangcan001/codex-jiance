@@ -10,16 +10,16 @@ const QUIT_ID: &str = "quit";
 
 pub(crate) fn setup<R: Runtime>(app: &App<R>) -> tauri::Result<()> {
     let open_dashboard =
-        MenuItem::with_id(app, OPEN_DASHBOARD_ID, "Open Dashboard", true, None::<&str>)?;
-    let hide_window = MenuItem::with_id(app, HIDE_WINDOW_ID, "Hide Window", true, None::<&str>)?;
+        MenuItem::with_id(app, OPEN_DASHBOARD_ID, "打开主界面", true, None::<&str>)?;
+    let hide_window = MenuItem::with_id(app, HIDE_WINDOW_ID, "隐藏窗口", true, None::<&str>)?;
     let separator = PredefinedMenuItem::separator(app)?;
-    let quit = MenuItem::with_id(app, QUIT_ID, "Quit", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, QUIT_ID, "退出", true, None::<&str>)?;
     let menu = Menu::with_items(app, &[&open_dashboard, &hide_window, &separator, &quit])?;
 
     let mut builder = TrayIconBuilder::with_id(TRAY_ID)
         .menu(&menu)
         .show_menu_on_left_click(false)
-        .tooltip("Codex Usage Monitor")
+        .tooltip("Codex 用量监控器")
         .on_menu_event(handle_menu_event)
         .on_tray_icon_event(handle_tray_icon_event);
 

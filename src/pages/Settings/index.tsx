@@ -14,7 +14,7 @@ function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message.length > 0) {
     return error.message;
   }
-  return "The backend command failed.";
+  return "后端命令执行失败。";
 }
 
 function Toggle({
@@ -110,7 +110,7 @@ export default function SettingsPage() {
       predictionAlertMinutes: 60,
     });
     setError(null);
-    setNotice("Defaults are staged locally. Save Settings to apply them.");
+    setNotice("默认设置已在本地暂存。点击“保存设置”后应用。");
   }
 
   async function save() {
@@ -122,7 +122,7 @@ export default function SettingsPage() {
       const next = await updateAppSettings(form);
       setSaved(next);
       setForm(next);
-      setNotice(next.message ?? "Settings saved.");
+      setNotice(next.message ?? "设置已保存。");
     } catch (saveError: unknown) {
       setError(getErrorMessage(saveError));
     } finally {
@@ -134,57 +134,57 @@ export default function SettingsPage() {
     <div className="page">
       <header className="page-header">
         <div>
-          <p className="page-kicker">Application</p>
-          <h1>Settings</h1>
-          <p className="page-subtitle">Control local monitoring, alerts, startup, and persistence.</p>
+          <p className="page-kicker">应用</p>
+          <h1>设置</h1>
+          <p className="page-subtitle">管理本地监控、告警、开机启动和数据存储。</p>
         </div>
         <div className="section-heading__actions">
           <button className="button button--secondary" type="button" onClick={resetDefaults} disabled={isLoading || isSaving}>
-            Reset Defaults
+            恢复默认值
           </button>
           <button className="button" type="button" onClick={() => void save()} disabled={!dirty || isSaving}>
-            {isSaving ? "Saving…" : "Save Settings"}
+            {isSaving ? "正在保存…" : "保存设置"}
           </button>
         </div>
       </header>
 
-      {isLoading ? <LoadingState label="Loading application settings" /> : null}
-      {error ? <ErrorState title="Settings unavailable" message={error} /> : null}
+      {isLoading ? <LoadingState label="正在加载应用设置" /> : null}
+      {error ? <ErrorState title="设置不可用" message={error} /> : null}
       {notice ? <p className="settings-notice">{notice}</p> : null}
 
       {form ? (
         <>
           <section className="settings-section" aria-labelledby="general-settings-heading">
-            <div className="section-heading"><div><p className="section-kicker">Preferences</p><h2 id="general-settings-heading">General</h2></div></div>
+            <div className="section-heading"><div><p className="section-kicker">偏好设置</p><h2 id="general-settings-heading">常规</h2></div></div>
             <div className="settings-list">
-              <label className="setting-row"><span><strong>Close to tray</strong><small>Keep monitoring active when the window is closed.</small></span><Toggle checked={form.closeToTray} label="Close to tray" onChange={(value) => update("closeToTray", value)} /></label>
-              <label className="setting-row"><span><strong>System notifications</strong><small>Show OS notifications for enabled alerts.</small></span><Toggle checked={form.systemNotifications} label="System notifications" onChange={(value) => update("systemNotifications", value)} /></label>
+              <label className="setting-row"><span><strong>关闭到系统托盘</strong><small>关闭窗口后继续保持监控。</small></span><Toggle checked={form.closeToTray} label="关闭到系统托盘" onChange={(value) => update("closeToTray", value)} /></label>
+              <label className="setting-row"><span><strong>系统通知</strong><small>为已启用的告警显示系统通知。</small></span><Toggle checked={form.systemNotifications} label="系统通知" onChange={(value) => update("systemNotifications", value)} /></label>
             </div>
           </section>
 
           <section className="settings-section" aria-labelledby="alert-settings-heading">
-            <div className="section-heading"><div><p className="section-kicker">Monitoring</p><h2 id="alert-settings-heading">Alerts</h2></div></div>
+            <div className="section-heading"><div><p className="section-kicker">监控</p><h2 id="alert-settings-heading">告警</h2></div></div>
             <div className="settings-list">
-              <label className="setting-row"><span><strong>Usage threshold alerts</strong><small>Record and notify when official usage crosses a threshold.</small></span><Toggle checked={form.usageThresholdAlerts} label="Usage threshold alerts" onChange={(value) => update("usageThresholdAlerts", value)} /></label>
-              <label className="setting-row"><span><strong>Prediction alerts</strong><small>Record and notify when estimated depletion is approaching.</small></span><Toggle checked={form.predictionAlerts} label="Prediction alerts" onChange={(value) => update("predictionAlerts", value)} /></label>
-              <label className="setting-row"><span><strong>Warning threshold (%)</strong><small>First official usage alert.</small></span><input className="settings-number" type="number" min="1" max="98" value={form.warningThreshold} onChange={(event) => update("warningThreshold", Number(event.target.value))} /></label>
-              <label className="setting-row"><span><strong>High threshold (%)</strong><small>High usage alert.</small></span><input className="settings-number" type="number" min="2" max="99" value={form.highThreshold} onChange={(event) => update("highThreshold", Number(event.target.value))} /></label>
-              <label className="setting-row"><span><strong>Critical threshold (%)</strong><small>Critical usage alert. Exhausted at 100% is fixed.</small></span><input className="settings-number" type="number" min="3" max="99" value={form.criticalThreshold} onChange={(event) => update("criticalThreshold", Number(event.target.value))} /></label>
-              <label className="setting-row"><span><strong>Prediction alert minutes</strong><small>Alert window from 5 to 240 minutes.</small></span><input className="settings-number" type="number" min="5" max="240" value={form.predictionAlertMinutes} onChange={(event) => update("predictionAlertMinutes", Number(event.target.value))} /></label>
+              <label className="setting-row"><span><strong>额度阈值告警</strong><small>官方用量跨过阈值时记录并通知。</small></span><Toggle checked={form.usageThresholdAlerts} label="额度阈值告警" onChange={(value) => update("usageThresholdAlerts", value)} /></label>
+              <label className="setting-row"><span><strong>额度预测告警</strong><small>预计额度即将耗尽时记录并通知。</small></span><Toggle checked={form.predictionAlerts} label="额度预测告警" onChange={(value) => update("predictionAlerts", value)} /></label>
+              <label className="setting-row"><span><strong>提醒阈值（%）</strong><small>第一个官方用量告警。</small></span><input className="settings-number" type="number" min="1" max="98" value={form.warningThreshold} onChange={(event) => update("warningThreshold", Number(event.target.value))} /></label>
+              <label className="setting-row"><span><strong>高风险阈值（%）</strong><small>高用量告警。</small></span><input className="settings-number" type="number" min="2" max="99" value={form.highThreshold} onChange={(event) => update("highThreshold", Number(event.target.value))} /></label>
+              <label className="setting-row"><span><strong>严重阈值（%）</strong><small>严重用量告警。100% 耗尽状态固定。</small></span><input className="settings-number" type="number" min="3" max="99" value={form.criticalThreshold} onChange={(event) => update("criticalThreshold", Number(event.target.value))} /></label>
+              <label className="setting-row"><span><strong>预测提前告警时间（分钟）</strong><small>告警范围为 5 至 240 分钟。</small></span><input className="settings-number" type="number" min="5" max="240" value={form.predictionAlertMinutes} onChange={(event) => update("predictionAlertMinutes", Number(event.target.value))} /></label>
             </div>
           </section>
 
           <section className="settings-section" aria-labelledby="startup-settings-heading">
-            <div className="section-heading"><div><p className="section-kicker">Windows</p><h2 id="startup-settings-heading">Startup</h2></div><StatusBadge variant={saved?.autostartAvailable ? "success" : "warning"}>{saved?.autostartAvailable ? "Available" : "Unavailable"}</StatusBadge></div>
+            <div className="section-heading"><div><p className="section-kicker">Windows</p><h2 id="startup-settings-heading">启动</h2></div><StatusBadge variant={saved?.autostartAvailable ? "success" : "warning"}>{saved?.autostartAvailable ? "可用" : "不可用"}</StatusBadge></div>
             <div className="settings-list">
-              <label className="setting-row"><span><strong>Start with Windows</strong><small>Register this app with the official Tauri autostart plugin.</small></span><Toggle checked={form.startWithWindows} label="Start with Windows" onChange={(value) => update("startWithWindows", value)} /></label>
-              <div className="detail-row"><span>Registered state</span><strong>{saved?.autostartRegistered === null ? "Unknown" : saved?.autostartRegistered ? "Enabled" : "Disabled"}</strong></div>
+              <label className="setting-row"><span><strong>开机自动启动</strong><small>使用 Tauri 官方自动启动插件注册本应用。</small></span><Toggle checked={form.startWithWindows} label="开机自动启动" onChange={(value) => update("startWithWindows", value)} /></label>
+              <div className="detail-row"><span>注册状态</span><strong>{saved?.autostartRegistered === null ? "未知" : saved?.autostartRegistered ? "已启用" : "已停用"}</strong></div>
             </div>
           </section>
 
           <section className="settings-section" aria-labelledby="database-settings-heading">
-            <div className="section-heading"><div><p className="section-kicker">Persistence</p><h2 id="database-settings-heading">Database</h2></div>{database ? <StatusBadge variant="success">Connected</StatusBadge> : null}</div>
-            {database ? <div className="database-details"><div className="detail-row"><span>Database Status</span><StatusBadge variant={database.connected ? "success" : "error"}>{database.connected ? "Connected" : "Error"}</StatusBadge></div><div className="detail-row"><span>Schema Version</span><strong>v{database.schemaVersion}</strong></div><div className="detail-row detail-row--path"><span>Database Path</span><code title={database.path}>{database.path}</code></div></div> : null}
+            <div className="section-heading"><div><p className="section-kicker">数据存储</p><h2 id="database-settings-heading">数据库</h2></div>{database ? <StatusBadge variant="success">已连接</StatusBadge> : null}</div>
+            {database ? <div className="database-details"><div className="detail-row"><span>数据库状态</span><StatusBadge variant={database.connected ? "success" : "error"}>{database.connected ? "已连接" : "错误"}</StatusBadge></div><div className="detail-row"><span>数据库版本</span><strong>v{database.schemaVersion}</strong></div><div className="detail-row detail-row--path"><span>数据库路径</span><code title={database.path}>{database.path}</code></div></div> : null}
           </section>
         </>
       ) : null}

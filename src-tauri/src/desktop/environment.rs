@@ -79,9 +79,8 @@ pub(crate) async fn discover_environment() -> DesktopEnvironmentInfo {
             desktop_process_pid: None,
             runtime_version: None,
             last_activity_at: None,
-            message:
-                "Codex Desktop local data not found. Open Codex Desktop and use it normally first."
-                    .to_owned(),
+            message: "未找到 Codex 桌面版本地数据。请先打开 Codex 桌面版并正常使用一次。"
+                .to_owned(),
         };
     };
 
@@ -102,7 +101,7 @@ pub(crate) async fn discover_environment() -> DesktopEnvironmentInfo {
         desktop_process_pid: process.and_then(|(_, pid)| pid),
         runtime_version: None,
         last_activity_at: None,
-        message: "Codex Desktop local data is available.".to_owned(),
+        message: "Codex 桌面版本地数据可用。".to_owned(),
     }
 }
 
@@ -138,13 +137,9 @@ async fn detect_desktop_process() -> Result<(bool, Option<u32>), AppError> {
         .output();
     let output = timeout(Duration::from_secs(3), command)
         .await
-        .map_err(|_| {
-            AppError::ProcessTimeout("Desktop process inspection timed out.".to_owned())
-        })??;
+        .map_err(|_| AppError::ProcessTimeout("桌面版进程检查超时。".to_owned()))??;
     if !output.status.success() {
-        return Err(AppError::Process(
-            "Desktop process inspection failed.".to_owned(),
-        ));
+        return Err(AppError::Process("桌面版进程检查失败。".to_owned()));
     }
     let stdout = String::from_utf8_lossy(&output.stdout);
     let pid = stdout

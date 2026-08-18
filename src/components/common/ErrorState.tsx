@@ -6,7 +6,7 @@ interface ErrorStateProps {
 
 export function ErrorState({
   message,
-  title = "Failed to load system status",
+  title = "系统状态加载失败",
   onRetry,
 }: ErrorStateProps) {
   return (
@@ -19,7 +19,7 @@ export function ErrorState({
         <p>{message}</p>
         {onRetry ? (
           <button className="button button--secondary" type="button" onClick={onRetry}>
-            Retry
+            重试
           </button>
         ) : null}
       </div>

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "Codex Usage Monitor",
+  "productName": "Codex 用量监控器",
   "version": "0.1.0",
   "identifier": "com.codexusagemonitor.app",
   "build": {
@@ -12,7 +12,7 @@
   "app": {
     "windows": [
       {
-        "title": "Codex Usage Monitor",
+        "title": "Codex 用量监控器",
         "width": 1100,
         "height": 720,
         "minWidth": 900,
@@ -28,7 +28,9 @@
     "targets": ["nsis"],
     "windows": {
       "nsis": {
-        "installMode": "currentUser"
+        "installMode": "currentUser",
+        "languages": ["SimpChinese"],
+        "displayLanguageSelector": false
       }
     },
     "icon": [
