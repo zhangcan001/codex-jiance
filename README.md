@@ -1,26 +1,19 @@
 # Codex Usage Monitor v0.1.0
 
-Codex Usage Monitor is a Windows desktop monitor for local Codex usage, rate limits, token activity, and bounded history. The v0.1.0 release candidate targets Windows 10/11 x86_64 and uses a current-user NSIS installer.
+Codex Usage Monitor is a Windows desktop monitor for Codex Desktop local activity. This build is the `v0.1.0 Desktop Direct Migration` and remains a Release Candidate until fresh live Desktop acceptance is complete.
 
-## What it provides
+## Architecture
 
-- Read-only Codex CLI detection and App Server lifecycle control.
-- `initialize` / `initialized` handshake and installed-schema compatibility checks.
-- Official account, rate-limit, and usage reads with local SQLite history.
-- Burn Rate and quota depletion prediction, clearly labeled as `ESTIMATED`.
-- Passive thread token observation with project/model/history aggregation.
-- Settings for tray behavior, Windows startup, notifications, thresholds, and prediction timing.
-- Native alerts, system tray controls, restart-safe watchers, and bounded background cleanup.
+- Reads `%USERPROFILE%\.codex` (or `CODEX_HOME`) directly.
+- Uses the newest `state_*.sqlite` as an optional read-only index.
+- Streams `sessions\YYYY\MM\DD\rollout-*.jsonl` with bounded lines and persistent byte cursors.
+- Uses rollout `session_meta`, `turn_context`, and `token_count` records only.
+- Derives Desktop token deltas, project/model totals, rate-limit observations, burn rates, and pricing coverage.
+- Stores monitor data separately at `%APPDATA%\com.codexusagemonitor.app\codex-usage-monitor.db`.
 
-Data labels used by the UI and reports are `OFFICIAL`, `DERIVED`, and `ESTIMATED`. Official values come from Codex App Server responses. Derived values are calculated from observed local data. Estimates are not presented as official Codex predictions.
+The monitor does not require the standalone Codex CLI, start another local runtime, call a backend API, read credentials, or create model activity. It does not persist prompts, responses, reasoning text, tool arguments, or rollout JSON lines.
 
-Thread token coverage is limited to notifications observed by this monitor's App Server connection. The application does not resume threads to harvest history, does not read conversation previews, and does not persist prompts or assistant messages. No `thread/resume` is used for monitoring.
-
-Account and monitoring access is read-only. The app does not start login, log out, accept API keys, persist credentials, refresh tokens, read `auth.json` or cookies, or make model requests.
-
-## Release status
-
-`Codex Usage Monitor v0.1.0` — Release Candidate. The Windows installer is unsigned unless a real signing certificate is present in the build environment. No updater, tag, GitHub Release, or binary upload is part of this release candidate.
+Rate-limit cards are labeled `Official · Desktop observation`; token totals and project/model reports are `Derived`; burn-rate and prediction reports are `Estimated`. An expired local observation is shown as awaiting the next Desktop activity rather than being presented as current.
 
 ## Development
 
@@ -40,14 +33,8 @@ cargo test
 cargo clippy -- -D warnings
 ```
 
-Build the Windows NSIS candidate:
+Schema version is v4. The migration is `src-tauri/migrations/0004_desktop_direct.sql`. Do not treat the previous NSIS candidate as the final Desktop Direct installer; build a fresh package after live acceptance.
 
-```bash
-npm run tauri build
-```
+## Release status
 
-The database is stored at `%APPDATA%\com.codexusagemonitor.app\codex-usage-monitor.db`; the current schema is v3. The installer is generated under `src-tauri\target\release\bundle\nsis\` and is intentionally not committed.
-
-## Roadmap
-
-DEV-001 through DEV-025 are complete for the v0.1.0 scope. See [CHANGELOG.md](CHANGELOG.md) and [docs/RELEASE_CHECKLIST.md](docs/RELEASE_CHECKLIST.md) for the user-facing release notes and validation record.
+`Codex Usage Monitor v0.1.0 Desktop Direct Migration` — Release Candidate `NOT READY`. No tag or GitHub Release is created by this migration.
