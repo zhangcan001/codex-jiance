@@ -12,6 +12,7 @@ mod prediction;
 pub mod pricing;
 mod project;
 mod rate_limit;
+mod settings;
 mod state;
 mod thread_usage;
 mod tray;
@@ -19,7 +20,9 @@ mod usage;
 
 use error::AppError;
 use state::AppState;
+use std::sync::Arc;
 use tauri::Manager;
+use tauri_plugin_autostart::{init as init_autostart, MacosLauncher};
 use tauri_plugin_log::{Target, TargetKind, TimezoneStrategy};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -38,6 +41,7 @@ pub fn run() -> Result<(), tauri::Error> {
                 .build(),
         )
         .plugin(tauri_plugin_notification::init())
+        .plugin(init_autostart(MacosLauncher::LaunchAgent, None))
         .setup(|app| {
             log::info!("Application starting");
 
@@ -48,7 +52,16 @@ pub fn run() -> Result<(), tauri::Error> {
             let database = tauri::async_runtime::block_on(database::initialize(&app_data_dir))
                 .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
 
-            app.manage(AppState::from_database(database, app.handle().clone()));
+            let autostart = Arc::new(settings::TauriAutostartBackend::new(app.handle().clone()));
+            let settings_service = tauri::async_runtime::block_on(
+                settings::SettingsService::initialize(database.pool.clone(), autostart),
+            )
+            .map_err(|error| Box::new(error) as Box<dyn std::error::Error>)?;
+            app.manage(AppState::from_database(
+                database,
+                app.handle().clone(),
+                settings_service,
+            ));
             app.state::<AppState>().alert_service.start();
             tray::setup(app)?;
             log::info!("Application ready");
@@ -58,6 +71,8 @@ pub fn run() -> Result<(), tauri::Error> {
             commands::system::get_app_info,
             commands::system::health_check,
             commands::database::database_status,
+            commands::settings::get_app_settings,
+            commands::settings::update_app_settings,
             commands::codex::detect_codex_environment,
             commands::codex::start_codex_app_server,
             commands::codex::stop_codex_app_server,
@@ -82,8 +97,13 @@ pub fn run() -> Result<(), tauri::Error> {
 
             if let tauri::WindowEvent::CloseRequested { api, .. } = event {
                 api.prevent_close();
-                if let Err(error) = window.hide() {
-                    log::error!("Failed to hide main window to tray: {error}");
+                let state = window.app_handle().state::<AppState>();
+                if state.settings_service.close_to_tray() {
+                    if let Err(error) = window.hide() {
+                        log::error!("Failed to hide main window to tray: {error}");
+                    }
+                } else {
+                    window.app_handle().exit(0);
                 }
             }
         })

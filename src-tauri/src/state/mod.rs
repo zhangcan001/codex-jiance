@@ -14,6 +14,7 @@ use crate::{
     prediction::QuotaPredictionService,
     project::ProjectService,
     rate_limit::{RateLimitRepository, RateLimitService},
+    settings::SettingsService,
     thread_usage::{ThreadUsageRepository, ThreadUsageService},
     usage::UsageService,
 };
@@ -33,10 +34,15 @@ pub struct AppState {
     pub project_service: Arc<ProjectService>,
     pub model_usage_service: Arc<ModelUsageService>,
     pub history_service: Arc<HistoryService>,
+    pub settings_service: Arc<SettingsService>,
 }
 
 impl AppState {
-    pub fn from_database(database: Database, app_handle: tauri::AppHandle) -> Self {
+    pub fn from_database(
+        database: Database,
+        app_handle: tauri::AppHandle,
+        settings_service: Arc<SettingsService>,
+    ) -> Self {
         let app_server_manager = Arc::new(AppServerManager::new());
         let schema_compatibility_service = Arc::new(SchemaCompatibilityService::new());
         let account_service = Arc::new(AccountService::new(
@@ -62,6 +68,7 @@ impl AppState {
             app_handle,
             Arc::clone(&rate_limit_service),
             Arc::clone(&quota_prediction_service),
+            Arc::clone(&settings_service),
         );
         let usage_service = Arc::new(UsageService::new(
             Arc::clone(&app_server_manager),
@@ -99,6 +106,7 @@ impl AppState {
             project_service,
             model_usage_service,
             history_service,
+            settings_service,
         }
     }
 }

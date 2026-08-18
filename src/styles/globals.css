@@ -813,7 +813,24 @@ h3 {
   width: 34px;
   height: 18px;
   accent-color: var(--accent);
-  cursor: not-allowed;
+  cursor: pointer;
+}
+
+.settings-number {
+  width: 78px !important;
+  height: 32px !important;
+  padding: 0 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  color: var(--text-primary);
+  background: var(--surface-hover);
+  text-align: right;
+}
+
+.settings-notice {
+  margin-top: 16px;
+  color: var(--text-secondary);
+  font-size: 12px;
 }
 
 .detail-row {

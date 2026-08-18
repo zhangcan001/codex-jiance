@@ -10,13 +10,13 @@ use crate::{
     account::unix_timestamp,
     prediction::{QuotaPrediction, QuotaPredictionOutcome, QuotaPredictionService},
     rate_limit::{RateLimitInfo, RateLimitService, RateLimitWindow, RateLimitWindowKind},
+    settings::{AppSettings, SettingsService},
 };
 
 use super::model::{AlertServiceStatus, QuotaAlert, QuotaAlertSeverity, QuotaAlertType};
 
 const ALERT_HISTORY_LIMIT: usize = 50;
-const PREDICTION_ALERT_MAX_SECONDS: f64 = 3_600.0;
-const THRESHOLDS: [u8; 4] = [80, 90, 95, 100];
+const EXHAUSTED_THRESHOLD: u8 = 100;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 struct OwnedAlertCycleKey {
@@ -118,6 +118,7 @@ impl AlertStore {
 pub(crate) struct AlertService {
     rate_limit_service: Arc<RateLimitService>,
     prediction_service: Arc<QuotaPredictionService>,
+    settings_service: Arc<SettingsService>,
     notifier: Arc<dyn AlertNotifier>,
     store: Mutex<AlertStore>,
     worker: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
@@ -129,11 +130,13 @@ impl AlertService {
         app: AppHandle,
         rate_limit_service: Arc<RateLimitService>,
         prediction_service: Arc<QuotaPredictionService>,
+        settings_service: Arc<SettingsService>,
     ) -> Arc<Self> {
         Arc::new(Self::with_notifier(
             rate_limit_service,
             prediction_service,
             Arc::new(NativeAlertNotifier { app }),
+            settings_service,
         ))
     }
 
@@ -141,10 +144,12 @@ impl AlertService {
         rate_limit_service: Arc<RateLimitService>,
         prediction_service: Arc<QuotaPredictionService>,
         notifier: Arc<dyn AlertNotifier>,
+        settings_service: Arc<SettingsService>,
     ) -> Self {
         Self {
             rate_limit_service,
             prediction_service,
+            settings_service,
             notifier,
             store: Mutex::new(AlertStore::new()),
             worker: Mutex::new(None),
@@ -206,6 +211,7 @@ impl AlertService {
 
     async fn process_update(&self, info: RateLimitInfo) {
         let predictions = self.prediction_service.get_predictions(false).await;
+        let settings = self.settings_service.snapshot().settings;
         let now = unix_timestamp();
         let mut pending_notifications = Vec::new();
 
@@ -215,10 +221,14 @@ impl AlertService {
                 .lock()
                 .expect("alert store mutex should not be poisoned");
             for window in &info.windows {
-                let triggers = threshold_triggers(window, &mut store.processed_thresholds);
+                let triggers = if settings.usage_threshold_alerts {
+                    threshold_triggers(window, &mut store.processed_thresholds, &settings)
+                } else {
+                    Vec::new()
+                };
                 let threshold_was_created = !triggers.is_empty();
                 for trigger in triggers {
-                    let alert = threshold_alert(window, trigger.threshold, now);
+                    let alert = threshold_alert(window, trigger.threshold, &settings, now);
                     store.add(alert.clone());
                     pending_notifications.push((alert, true, None));
                 }
@@ -229,38 +239,43 @@ impl AlertService {
                         && prediction.window_duration_mins == window.window_duration_mins
                         && prediction.resets_at == window.resets_at
                 });
-                if let Some(prediction) = prediction_alert_candidate(prediction) {
-                    let Some(limit_id) = window.limit_id.as_deref() else {
-                        continue;
-                    };
-                    let cycle = OwnedAlertCycleKey {
-                        limit_id: limit_id.to_owned(),
-                        window_kind: window.window_kind,
-                        window_duration_mins: window.window_duration_mins,
-                        resets_at: window.resets_at,
-                    };
-                    if store.processed_predictions.insert(cycle.clone()) {
-                        let alert = prediction_alert(window, prediction, now);
-                        store.add(alert.clone());
-                        if threshold_was_created {
-                            store
-                                .deferred_predictions
-                                .insert(cycle.clone(), alert.clone());
-                        }
-                        pending_notifications.push((alert, !threshold_was_created, None));
-                    } else if !threshold_was_created {
-                        if let Some(alert) = store.deferred_predictions.get(&cycle).cloned() {
-                            pending_notifications.push((alert, true, Some(cycle)));
+                if settings.prediction_alerts {
+                    if let Some(prediction) =
+                        prediction_alert_candidate(prediction, settings.prediction_alert_minutes)
+                    {
+                        let Some(limit_id) = window.limit_id.as_deref() else {
+                            continue;
+                        };
+                        let cycle = OwnedAlertCycleKey {
+                            limit_id: limit_id.to_owned(),
+                            window_kind: window.window_kind,
+                            window_duration_mins: window.window_duration_mins,
+                            resets_at: window.resets_at,
+                        };
+                        if store.processed_predictions.insert(cycle.clone()) {
+                            let alert = prediction_alert(window, prediction, now);
+                            store.add(alert.clone());
+                            if threshold_was_created {
+                                store
+                                    .deferred_predictions
+                                    .insert(cycle.clone(), alert.clone());
+                            }
+                            pending_notifications.push((alert, !threshold_was_created, None));
+                        } else if !threshold_was_created {
+                            if let Some(alert) = store.deferred_predictions.get(&cycle).cloned() {
+                                pending_notifications.push((alert, true, Some(cycle)));
+                            }
                         }
                     }
                 }
             }
         }
 
-        let notifications_enabled = self
-            .notifier
-            .permission_state()
-            .is_ok_and(|permission| permission == NotificationPermission::Granted);
+        let notifications_enabled = settings.system_notifications
+            && self
+                .notifier
+                .permission_state()
+                .is_ok_and(|permission| permission == NotificationPermission::Granted);
         for (alert, should_notify, deferred_cycle) in pending_notifications {
             if should_notify && notifications_enabled {
                 match self.notifier.notify("Codex Usage Monitor", &alert.message) {
@@ -337,13 +352,19 @@ fn cycle_key(window: &RateLimitWindow) -> Option<OwnedAlertCycleKey> {
 fn threshold_triggers(
     window: &RateLimitWindow,
     processed: &mut HashSet<(OwnedAlertCycleKey, u8)>,
+    settings: &AppSettings,
 ) -> Vec<ThresholdTrigger> {
     let Some(cycle) = cycle_key(window) else {
         return Vec::new();
     };
-    let crossed = THRESHOLDS
-        .iter()
-        .copied()
+    let thresholds = [
+        settings.warning_threshold,
+        settings.high_threshold,
+        settings.critical_threshold,
+        EXHAUSTED_THRESHOLD,
+    ];
+    let crossed = thresholds
+        .into_iter()
         .filter(|threshold| window.used_percent >= f64::from(*threshold))
         .collect::<Vec<_>>();
     let new_thresholds = crossed
@@ -364,24 +385,32 @@ fn threshold_triggers(
     }]
 }
 
-fn prediction_alert_candidate(prediction: Option<&QuotaPrediction>) -> Option<&QuotaPrediction> {
+fn prediction_alert_candidate(
+    prediction: Option<&QuotaPrediction>,
+    alert_minutes: u16,
+) -> Option<&QuotaPrediction> {
     let prediction = prediction?;
     if prediction.outcome != QuotaPredictionOutcome::DepletionBeforeReset {
         return None;
     }
     let seconds = prediction.seconds_to_depletion?;
-    (seconds.is_finite() && (0.0..=PREDICTION_ALERT_MAX_SECONDS).contains(&seconds))
-        .then_some(prediction)
+    let max_seconds = f64::from(alert_minutes) * 60.0;
+    (seconds.is_finite() && (0.0..=max_seconds).contains(&seconds)).then_some(prediction)
 }
 
-fn threshold_alert(window: &RateLimitWindow, threshold: u8, created_at: i64) -> QuotaAlert {
+fn threshold_alert(
+    window: &RateLimitWindow,
+    threshold: u8,
+    settings: &AppSettings,
+    created_at: i64,
+) -> QuotaAlert {
     QuotaAlert {
         id: String::new(),
         alert_type: QuotaAlertType::UsageThreshold,
         severity: match threshold {
-            80 => QuotaAlertSeverity::Warning,
-            90 => QuotaAlertSeverity::High,
-            95 => QuotaAlertSeverity::Critical,
+            value if value == settings.warning_threshold => QuotaAlertSeverity::Warning,
+            value if value == settings.high_threshold => QuotaAlertSeverity::High,
+            value if value == settings.critical_threshold => QuotaAlertSeverity::Critical,
             _ => QuotaAlertSeverity::Exhausted,
         },
         limit_id: window.limit_id.clone(),
@@ -447,39 +476,63 @@ mod tests {
     #[test]
     fn threshold_rules_progress_and_skip_lower_first_alerts() {
         let mut processed = HashSet::new();
+        let settings = AppSettings::default();
         assert_eq!(
-            threshold_triggers(&window(79.0, Some(1)), &mut processed).len(),
+            threshold_triggers(&window(79.0, Some(1)), &mut processed, &settings).len(),
             0
         );
         assert_eq!(
-            threshold_triggers(&window(82.0, Some(1)), &mut processed)[0].threshold,
+            threshold_triggers(&window(82.0, Some(1)), &mut processed, &settings)[0].threshold,
             80
         );
         assert_eq!(
-            threshold_triggers(&window(91.0, Some(1)), &mut processed)[0].threshold,
+            threshold_triggers(&window(91.0, Some(1)), &mut processed, &settings)[0].threshold,
             90
         );
         assert_eq!(
-            threshold_triggers(&window(96.0, Some(1)), &mut processed)[0].threshold,
+            threshold_triggers(&window(96.0, Some(1)), &mut processed, &settings)[0].threshold,
             95
         );
         assert_eq!(
-            threshold_triggers(&window(100.0, Some(1)), &mut processed)[0].threshold,
+            threshold_triggers(&window(100.0, Some(1)), &mut processed, &settings)[0].threshold,
             100
         );
-        assert!(threshold_triggers(&window(100.0, Some(1)), &mut processed).is_empty());
+        assert!(threshold_triggers(&window(100.0, Some(1)), &mut processed, &settings).is_empty());
     }
 
     #[test]
     fn first_high_usage_emits_only_highest_crossed_threshold_and_reset_restarts_cycle() {
         let mut processed = HashSet::new();
+        let settings = AppSettings::default();
         assert_eq!(
-            threshold_triggers(&window(96.0, Some(1)), &mut processed)[0].threshold,
+            threshold_triggers(&window(96.0, Some(1)), &mut processed, &settings)[0].threshold,
             95
         );
         assert_eq!(
-            threshold_triggers(&window(96.0, Some(2)), &mut processed)[0].threshold,
+            threshold_triggers(&window(96.0, Some(2)), &mut processed, &settings)[0].threshold,
             95
+        );
+    }
+
+    #[test]
+    fn custom_thresholds_keep_exhausted_fixed_at_100() {
+        let mut settings = AppSettings::default();
+        settings.warning_threshold = 70;
+        settings.high_threshold = 85;
+        settings.critical_threshold = 93;
+        let mut processed = HashSet::new();
+        assert_eq!(
+            threshold_triggers(&window(90.0, Some(1)), &mut processed, &settings)[0].threshold,
+            85
+        );
+        assert_eq!(
+            threshold_triggers(&window(100.0, Some(1)), &mut processed, &settings)[0].threshold,
+            100
+        );
+        assert!(threshold_triggers(&window(100.0, Some(1)), &mut processed, &settings).is_empty());
+        assert_eq!(
+            threshold_alert(&window(70.0, Some(1)), 70, &settings, 1).severity,
+            QuotaAlertSeverity::Warning
         );
     }
 
@@ -501,10 +554,11 @@ mod tests {
             calculated_at: 0,
             message: Some("Estimated depletion before reset".to_owned()),
         };
-        assert!(prediction_alert_candidate(Some(&prediction)).is_some());
+        assert!(prediction_alert_candidate(Some(&prediction), 60).is_some());
         let mut too_late = prediction.clone();
         too_late.seconds_to_depletion = Some(3_601.0);
-        assert!(prediction_alert_candidate(Some(&too_late)).is_none());
+        assert!(prediction_alert_candidate(Some(&too_late), 60).is_none());
+        assert!(prediction_alert_candidate(Some(&prediction), 5).is_none());
     }
 
     struct FakeNotifier {
@@ -541,8 +595,14 @@ mod tests {
             calls: Mutex::new(0),
         };
         let mut store = AlertStore::new();
+        let settings = AppSettings::default();
         for index in 0..51 {
-            store.add(threshold_alert(&window(80.0, Some(1)), 80, index));
+            store.add(threshold_alert(
+                &window(80.0, Some(1)),
+                80,
+                &settings,
+                index,
+            ));
         }
         assert_eq!(store.history.len(), ALERT_HISTORY_LIMIT);
         assert!(notifier.notify("title", "body").is_err());
@@ -574,6 +634,6 @@ mod tests {
             calculated_at: 0,
             message: Some("Quota currently exhausted".to_owned()),
         };
-        assert!(prediction_alert_candidate(Some(&prediction)).is_none());
+        assert!(prediction_alert_candidate(Some(&prediction), 60).is_none());
     }
 }

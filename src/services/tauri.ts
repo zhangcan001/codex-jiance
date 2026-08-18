@@ -15,7 +15,13 @@ import type {
   ModelUsageReport,
   MonitoringHistory,
 } from "../types/codex";
-import type { AppInfo, DatabaseStatus, HealthStatus } from "../types/system";
+import type {
+  AppInfo,
+  AppSettings,
+  AppSettingsSnapshot,
+  DatabaseStatus,
+  HealthStatus,
+} from "../types/system";
 
 export class TauriServiceError extends Error {
   readonly code: string;
@@ -66,6 +72,14 @@ export function healthCheck(): Promise<HealthStatus> {
 
 export function getDatabaseStatus(): Promise<DatabaseStatus> {
   return invokeCommand<DatabaseStatus>("database_status");
+}
+
+export function getAppSettings(): Promise<AppSettingsSnapshot> {
+  return invokeCommand<AppSettingsSnapshot>("get_app_settings");
+}
+
+export function updateAppSettings(settings: AppSettings): Promise<AppSettingsSnapshot> {
+  return invokeCommand<AppSettingsSnapshot>("update_app_settings", { settings });
 }
 
 export function detectCodexEnvironment(): Promise<CodexInstallationInfo> {

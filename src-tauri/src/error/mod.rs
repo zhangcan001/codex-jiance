@@ -51,6 +51,9 @@ pub enum AppError {
     #[error("Account service error: {0}")]
     AccountService(String),
 
+    #[error("Settings error: {0}")]
+    Settings(String),
+
     #[error("App Server stop failed: {0}")]
     AppServerStop(String),
 
@@ -148,6 +151,10 @@ impl From<AppError> for CommandError {
             },
             AppError::AccountService(message) => Self {
                 code: "ACCOUNT_SERVICE_ERROR".to_owned(),
+                message,
+            },
+            AppError::Settings(message) => Self {
+                code: "SETTINGS_ERROR".to_owned(),
                 message,
             },
             AppError::AppServerStop(message) => Self {
