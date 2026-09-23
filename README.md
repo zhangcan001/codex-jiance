@@ -18,7 +18,7 @@ Codex 用量监控器是一个 Windows 桌面监控工具，用于读取 Codex �
 ## 开发
 
 ```bash
-npm install
+npm ci
 npm run tauri dev
 npm run build
 ```
